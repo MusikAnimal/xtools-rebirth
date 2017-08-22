@@ -104,6 +104,14 @@ doctrine:
                 user:     "%database_replica_user%"
                 password: "%database_replica_password%"
                 charset:  UTF8
+            temporary:
+                driver:   pdo_mysql
+                host:     "%database_temporary_host%"
+                port:     "%database_temporary_port%"
+                dbname:   "%database_temporary_name%"
+                user:     "%database_temporary_user%"
+                password: "%database_temporary_password%"
+                charset:  UTF8
 
     orm:
         auto_generate_proxy_classes: "%kernel.debug%"

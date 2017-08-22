@@ -16,6 +16,25 @@ use Mediawiki\Api\SimpleRequest;
 class EditCounterRepository extends Repository
 {
 
+    private function prepareTemporaryTable(Project $project, User $user)
+    {
+        // FIXME: move the 20000 figure to config?
+        $engine = $user->getEditCount() > 20000 ? 'InnoDB' : 'MEMORY';
+
+        $tempTable = date('YmdHis') . md5($project->getDomain() . $user->getUsername());
+
+        $sql = "CREATE TEMPORARY TABLE `$tempTable` (
+                `page_namespace` int(11) NOT NULL DEFAULT '0',
+                `rev_page` int(8) unsigned NOT NULL DEFAULT '0',
+                `rev_timestamp` varbinary(14) NOT NULL DEFAULT '',
+                `rev_minor_edit` tinyint(1) unsigned NOT NULL DEFAULT '0',
+                `rev_parent_id` int(8) unsigned NOT NULL DEFAULT '0',
+                `rev_len` bigint(10) unsigned NOT NULL DEFAULT '0',
+                `rev_comment` varbinary(255) DEFAULT ''
+                ) ENGINE=$engine DEFAULT CHARSET=BINARY";
+        $this->getTemporaryConnection->query($sql);
+    }
+
     /**
      * Get data about revisions, pages, etc.
      * @param Project $project The project.

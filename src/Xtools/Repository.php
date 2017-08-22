@@ -70,7 +70,7 @@ abstract class Repository
         if (!$this->metaConnection instanceof Connection) {
             $this->metaConnection = $this->container
                 ->get('doctrine')
-                ->getManager("meta")
+                ->getManager('meta')
                 ->getConnection();
         }
         return $this->metaConnection;
@@ -101,10 +101,25 @@ abstract class Repository
         if (!$this->toolsConnection instanceof Connection) {
             $this->toolsConnection = $this->container
                 ->get('doctrine')
-                ->getManager("toolsdb")
+                ->getManager('toolsdb')
                 ->getConnection();
         }
         return $this->toolsConnection;
+    }
+
+    /**
+     * Get the database connection for the 'temporary' database.
+     * @return Connection
+     */
+    protected function getTemporaryConnection()
+    {
+        if (!$this->temporaryConnection instanceof Connection) {
+            $this->temporaryConnection = $this->container
+                ->get('doctrine')
+                ->getManager('temporary')
+                ->getConnection();
+        }
+        return $this->temporaryConnection;
     }
 
     /**
