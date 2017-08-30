@@ -15,24 +15,52 @@ use Mediawiki\Api\SimpleRequest;
  */
 class EditCounterRepository extends Repository
 {
+    /** @var string The name of the temporary table holding the revisions. */
+    protected $tempTable;
 
-    private function prepareTemporaryTable(Project $project, User $user)
+    public function prepareTemporaryTable(Project $project, User $user)
     {
         // FIXME: move the 20000 figure to config?
-        $engine = $user->getEditCount() > 20000 ? 'InnoDB' : 'MEMORY';
+        $engine = $user->getEditCount($project) > 20000 ? 'InnoDB' : 'MEMORY';
 
-        $tempTable = date('YmdHis') . md5($project->getDomain() . $user->getUsername());
+        // $this->tempTable = date('YmdHis') . md5($project->getDomain() . $user->getUsername());
+        $this->tempTable = '`s53003__xtools_dev`.`temp_table`';
 
-        $sql = "CREATE TEMPORARY TABLE `$tempTable` (
+        $sql = "CREATE TEMPORARY TABLE $this->tempTable (
                 `page_namespace` int(11) NOT NULL DEFAULT '0',
+                `page_title` varbinary(255) NOT NULL DEFAULT '',
                 `rev_page` int(8) unsigned NOT NULL DEFAULT '0',
                 `rev_timestamp` varbinary(14) NOT NULL DEFAULT '',
                 `rev_minor_edit` tinyint(1) unsigned NOT NULL DEFAULT '0',
+                `rev_id` int(8) unsigned NOT NULL DEFAULT '0',
                 `rev_parent_id` int(8) unsigned NOT NULL DEFAULT '0',
                 `rev_len` bigint(10) unsigned NOT NULL DEFAULT '0',
                 `rev_comment` varbinary(255) DEFAULT ''
                 ) ENGINE=$engine DEFAULT CHARSET=BINARY";
-        $this->getTemporaryConnection->query($sql);
+        $this->getProjectsConnection()->query($sql);
+
+        // Supply data
+        // $this->getRevisions()
+
+        // FIXME: make sure this works for IPs
+        $whereClause = $user->isAnon()
+            ? 'rev.rev_user_text = ' . $user->getUsername()
+            : 'rev.rev_user = ' . $user->getId($project);
+
+        $sql = "INSERT INTO $this->tempTable
+                SELECT page_namespace, page_title, rev_page, rev.rev_timestamp,
+                    rev.rev_minor_edit, IFNULL(rev.rev_id, 0),
+                    IFNULL(rev.rev_parent_id, 0), IFNULL(rev.rev_len, 0),
+                    -- Remove section title from edit summary
+                    TRIM(IF(
+                        INSTR(rev_comment, '/*') = 1 AND INSTR(rev_comment, '*/') > 1,
+                        SUBSTRING(rev_comment, INSTR(rev_comment, '*/') + 2),
+                        rev_comment
+                    )) AS rev_comment
+                FROM `enwiki_p`.`revision_userindex` rev
+                JOIN `enwiki_p`.`page` ON page_id = rev.rev_page
+                WHERE $whereClause";
+        $this->getProjectsConnection()->query($sql);
     }
 
     /**
@@ -46,72 +74,116 @@ class EditCounterRepository extends Repository
     {
         // Set up cache.
         $cacheKey = 'pairdata.'.$project->getDatabaseName().'.'.$user->getCacheKey();
-        if ($this->cache->hasItem($cacheKey)) {
-            return $this->cache->getItem($cacheKey)->get();
-        }
+        // if ($this->cache->hasItem($cacheKey)) {
+        //     return $this->cache->getItem($cacheKey)->get();
+        // }
 
         // Prepare the queries and execute them.
         $archiveTable = $this->getTableName($project->getDatabaseName(), 'archive');
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
-        $queries = "
 
+        /**
+         * Build array of different one-off queries we need to make on the temporary table.
+         * We have do these separately instead of doing a series of UNION queries because
+         * you can only reference a temporary table once in a single query.
+         * @var array
+         */
+        $queries = [];
+
+        // Revision counts
+        $queries[] = [
+            'key' => 'live',
+            'val' => 'COUNT(rev_id)',
+        ];
+        $queries[] = [
+            'key' => 'day',
+            'val' => 'COUNT(rev_id)',
+            'clause' => 'WHERE rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)',
+        ];
+        $queries[] = [
+            'key' => 'week',
+            'val' => 'COUNT(rev_id)',
+            'clause' => 'WHERE rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 WEEK)',
+        ];
+        $queries[] = [
+            'key' => 'month',
+            'val' => 'COUNT(rev_id)',
+            'clause' => 'WHERE rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 MONTH)',
+        ];
+        $queries[] = [
+            'key' => 'year',
+            'val' => 'COUNT(rev_id)',
+            'clause' => 'WHERE rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 YEAR)',
+        ];
+        $queries[] = [
+            'key' => 'with_comments',
+            'val' => 'COUNT(rev_id)',
+            'clause' => "WHERE rev_comment != ''",
+        ];
+        $queries[] = [
+            'key' => 'minor',
+            'val' => 'COUNT(rev_id)',
+            'clause' => 'WHERE rev_minor_edit = 1',
+        ];
+
+        // Dates.
+        $queries[] = [
+            'key' => 'first',
+            'val' => 'rev_timestamp',
+            'clause' => 'ORDER BY rev_timestamp ASC LIMIT 1',
+        ];
+        $queries[] = [
+            'key' => 'last',
+            'val' => 'rev_timestamp',
+            'clause' => 'ORDER BY rev_timestamp DESC LIMIT 1',
+        ];
+
+        // Page counts.
+        $queries[] = [
+            'key' => 'edited-live',
+            'val' => 'COUNT(DISTINCT rev_page)',
+        ];
+        $queries[] = [
+            'key' => 'created-live',
+            'val' => 'COUNT(DISTINCT rev_page)',
+            'clause' => 'WHERE rev_parent_id = 0',
+        ];
+
+        $revisionCounts = [
+            'live' => 5,
+        ];
+
+        // Run each query on the temporary table
+        foreach ($queries as $query) {
+            $sql = "SELECT '" . $query['key'] . "' AS `key`, " .
+                    $query['val'] . ' AS `val` ' .
+                    'FROM ' . $this->tempTable . ' ' .
+                    (isset($query['clause']) ? $query['clause'] : '');
+            $resultQuery = $this->getProjectsConnection()->query($sql);
+            $result = $resultQuery->fetch();
+            $revisionCounts[$result['key']] = $result['val'];
+        }
+
+        $archiveQueries = "
             -- Revision counts.
             (SELECT 'deleted' AS `key`, COUNT(ar_id) AS val FROM $archiveTable
                 WHERE ar_user = :userId
-            ) UNION (
-            SELECT 'live' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId
-            ) UNION (
-            SELECT 'day' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-            ) UNION (
-            SELECT 'week' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
-            ) UNION (
-            SELECT 'month' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            ) UNION (
-            SELECT 'year' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 YEAR)
-            ) UNION (
-            SELECT 'with_comments' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_comment != ''
-            ) UNION (
-            SELECT 'minor' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE rev_user = :userId AND rev_minor_edit = 1
-
-            -- Dates.
-            ) UNION (
-            SELECT 'first' AS `key`, rev_timestamp AS `val` FROM $revisionTable
-                WHERE rev_user = :userId ORDER BY rev_timestamp ASC LIMIT 1
-            ) UNION (
-            SELECT 'last' AS `key`, rev_timestamp AS `date` FROM $revisionTable
-                WHERE rev_user = :userId ORDER BY rev_timestamp DESC LIMIT 1
 
             -- Page counts.
-            ) UNION (
-            SELECT 'edited-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
-                FROM $revisionTable
-                WHERE rev_user = :userId
             ) UNION (
             SELECT 'edited-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
                 FROM $archiveTable
                 WHERE ar_user = :userId
-            ) UNION (
-            SELECT 'created-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
-                FROM $revisionTable
-                WHERE rev_user = :userId AND rev_parent_id = 0
             ) UNION (
             SELECT 'created-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
                 FROM $archiveTable
                 WHERE ar_user = :userId AND ar_parent_id = 0
             )
         ";
-        $resultQuery = $this->getProjectsConnection()->prepare($queries);
+        $resultQuery = $this->getProjectsConnection()->prepare($archiveQueries);
         $userId = $user->getId($project);
-        $resultQuery->bindParam("userId", $userId);
+        $resultQuery->bindParam('userId', $userId);
         $resultQuery->execute();
-        $revisionCounts = [];
         while ($result = $resultQuery->fetch()) {
             $revisionCounts[$result['key']] = $result['val'];
         }

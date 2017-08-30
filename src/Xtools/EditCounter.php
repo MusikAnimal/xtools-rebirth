@@ -76,13 +76,18 @@ class EditCounter extends Model
         $this->user = $user;
     }
 
+    public function prepareTemporaryTable()
+    {
+        $this->getRepository()->prepareTemporaryTable($this->project, $this->user);
+    }
+
     /**
      * Get revision and page counts etc.
      * @return int[]
      */
     protected function getPairData()
     {
-        if (! is_array($this->pairData)) {
+        if (!is_array($this->pairData)) {
             $this->pairData = $this->getRepository()
                 ->getPairData($this->project, $this->user);
         }

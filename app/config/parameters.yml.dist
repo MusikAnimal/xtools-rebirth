@@ -2,20 +2,25 @@
 # Set parameters here that may be different on each deployment target of the app, e.g. development, staging, production.
 # http://symfony.com/doc/current/best_practices/configuration.html#infrastructure-related-configuration
 parameters:
-    database_host:              127.0.0.1
-    database_port:              ~
-    database_name:              symfony
-    database_user:              root
-    database_password:          ~
-    database_replica_host:      127.0.0.1
-    database_replica_port:      ~
-    database_replica_name:      enwiki
-    database_replica_user:      root
-    database_replica_password:  ~
-    database_meta_name:         meta_p
-    database_toolsdb_host: 127.0.0.1
-    database_toolsdb_port: null
-    database_toolsdb_name: null
+    database_host:                  127.0.0.1
+    database_port:                  ~
+    database_name:                  symfony
+    database_user:                  root
+    database_password:              ~
+    database_temporary_host:        127.0.0.1
+    database_temporary_port:        ~
+    database_temporary_name:        symfony
+    database_temporary_user:        root
+    database_temporary_password:    ~
+    database_replica_host:          127.0.0.1
+    database_replica_port:          ~
+    database_replica_name:          enwiki
+    database_replica_user:          root
+    database_replica_password:      ~
+    database_meta_name:             meta_p
+    database_toolsdb_host:          127.0.0.1
+    database_toolsdb_port:          null
+    database_toolsdb_name:          null
 
     wiki_url:                   http://en.wikipedia.org
     api_path:                   /w/api.php

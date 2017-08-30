@@ -37,7 +37,7 @@ framework:
     session:
         # http://symfony.com/doc/current/reference/configuration/framework.html#handler-id
         # handler_id:  session.handler.native_file
-        handler_id: ~
+        handler_id:  ~
         save_path:   "%kernel.root_dir%/../var/sessions/%kernel.environment%"
     fragments:       ~
     http_method_override: true
@@ -126,6 +126,8 @@ doctrine:
                 connection: replicas
             toolsdb:
                 connection: toolsdb
+            temporary:
+                connection: temporary
 
 doctrine_migrations:
     dir_name: "%kernel.root_dir%/DoctrineMigrations"

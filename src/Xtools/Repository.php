@@ -29,8 +29,11 @@ abstract class Repository
     /** @var Connection The database connection to the projects' databases. */
     private $projectsConnection;
 
-    /** @var Connection The database connection to other tools' databases.  */
+    /** @var Connection The database connection to other tools' databases. */
     private $toolsConnection;
+
+    /** @var Connection The database connection to the temporary database. */
+    private $temporaryConnection;
 
     /** @var CacheItemPoolInterface The cache. */
     protected $cache;

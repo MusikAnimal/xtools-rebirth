@@ -82,7 +82,7 @@ class User extends Model
      * @param Project $project
      * @return int
      */
-    public function getEditCount()
+    public function getEditCount(Project $project)
     {
         $editCount = $this->getRepository()->getEditCount(
             $project->getDatabaseName(),
