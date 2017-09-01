@@ -376,13 +376,21 @@ class UserRepository extends Repository
      * Get the number of edits this user made using semi-automated tools.
      * @param Project $project
      * @param User $user
-     * @param string|int [$namespace] Namespace ID or 'all'
-     * @param string [$start] Start date in a format accepted by strtotime()
-     * @param string [$end] End date in a format accepted by strtotime()
+     * @param string|int $namespace Namespace ID or 'all'
+     * @param string $start Start date in a format accepted by strtotime()
+     * @param string $end End date in a format accepted by strtotime()
+     * @param string $tempTable For use with the Edit Counter. Use this table
+     *                          instead of the revision and page tables.
      * @return int Result of query, see below.
      */
-    public function countAutomatedEdits(Project $project, User $user, $namespace = 'all', $start = '', $end = '')
-    {
+    public function countAutomatedEdits(
+        Project $project,
+        User $user,
+        $namespace = 'all',
+        $start = '',
+        $end = '',
+        $tempTable = null
+    ) {
         $cacheKey = 'autoeditcount.' . $project->getDatabaseName() . '.'
             . $user->getCacheKey() . '.' . $namespace;
 
@@ -409,16 +417,25 @@ class UserRepository extends Repository
         }
         $this->stopwatch->start($cacheKey, 'XTools');
 
-        // Get the combined regex and tags for the tools
+        // Get the combined regex and tags for the tools.
         $conn = $this->getProjectsConnection();
         list($regex, $tags) = $this->getToolRegexAndTags($project->getDomain(), $conn);
 
-        $pageTable = $this->getTableName($project->getDatabaseName(), 'page');
-        $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
+        // Don't need to do a JOIN on `page` if given a user's temporary table.
+        if ($tempTable !== null) {
+            $revisionTable = $tempTable;
+            $pageJoin = '';
+            $whereClause = '';
+        } else {
+            $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
+            $pageTable = $this->getTableName($project->getDatabaseName(), 'page');
+            $pageJoin = $namespace === 'all' ? '' : "JOIN $pageTable ON page_id = rev_page";
+            $whereClause = 'rev_user_text = :username AND ';
+        }
+
         $tagTable = $this->getTableName($project->getDatabaseName(), 'change_tag');
-        $condNamespace = $namespace === 'all' ? '' : 'AND page_namespace = :namespace';
-        $pageJoin = $namespace === 'all' ? '' : "JOIN $pageTable ON page_id = rev_page";
         $tagJoin = '';
+        $condNamespace = $namespace === 'all' ? '' : 'AND page_namespace = :namespace';
 
         // Build SQL for detecting autoedits via regex and/or tags
         $condTools = [];
@@ -429,13 +446,13 @@ class UserRepository extends Repository
             $tagJoin = $tags != '' ? "LEFT OUTER JOIN $tagTable ON ct_rev_id = rev_id" : '';
             $condTools[] = "ct_tag IN ($tags)";
         }
-        $condTool = 'AND (' . implode(' OR ', $condTools) . ')';
+        $condTool = '(' . implode(' OR ', $condTools) . ')';
 
         $sql = "SELECT COUNT(DISTINCT(rev_id))
                 FROM $revisionTable
                 $pageJoin
                 $tagJoin
-                WHERE rev_user_text = :username
+                WHERE $whereClause
                 $condTool
                 $condNamespace
                 $condBegin
@@ -443,7 +460,9 @@ class UserRepository extends Repository
 
         $username = $user->getUsername();
         $resultQuery = $conn->prepare($sql);
-        $resultQuery->bindParam('username', $username);
+        if ($tempTable !== null) {
+            $resultQuery->bindParam('username', $username);
+        }
         if (!empty($start)) {
             $resultQuery->bindParam('start', $start);
         }

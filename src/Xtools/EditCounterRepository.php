@@ -18,13 +18,16 @@ class EditCounterRepository extends Repository
     /** @var string The name of the temporary table holding the revisions. */
     protected $tempTable;
 
+    /** @var string The name of the temporary table holding the parent revisions. */
+    protected $tempParentTable;
+
     public function prepareTemporaryTable(Project $project, User $user)
     {
         // FIXME: move the 20000 figure to config?
         $engine = $user->getEditCount($project) > 20000 ? 'InnoDB' : 'MEMORY';
 
-        // $this->tempTable = date('YmdHis') . md5($project->getDomain() . $user->getUsername());
-        $this->tempTable = '`s53003__xtools_dev`.`temp_table`';
+        $tempTableName = date('YmdHis') . md5($project->getDomain() . $user->getUsername());
+        $this->tempTable = "`s53003__xtools_dev`.`$tempTableName`";
 
         $sql = "CREATE TEMPORARY TABLE $this->tempTable (
                 `page_namespace` int(11) NOT NULL DEFAULT '0',
@@ -39,26 +42,46 @@ class EditCounterRepository extends Repository
                 ) ENGINE=$engine DEFAULT CHARSET=BINARY";
         $this->getProjectsConnection()->query($sql);
 
+        $this->tempParentTable = "`s53003__xtools_dev`.`$tempTableName"."_parent_revs`";
+        $sql = "CREATE TEMPORARY TABLE $this->tempParentTable (
+                `rev_id` int(8) unsigned NOT NULL DEFAULT '0',
+                `rev_len` bigint(10) unsigned NOT NULL DEFAULT '0'
+                ) ENGINE=$engine DEFAULT CHARSET=BINARY";
+        $this->getProjectsConnection()->query($sql);
+
         // Supply data
         // $this->getRevisions()
 
         // FIXME: make sure this works for IPs
         $whereClause = $user->isAnon()
-            ? 'rev.rev_user_text = ' . $user->getUsername()
-            : 'rev.rev_user = ' . $user->getId($project);
+            ? 'revs.rev_user_text = ' . $user->getUsername()
+            : 'revs.rev_user = ' . $user->getId($project);
 
+        $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
+        $pageTable = $this->getTableName($project->getDatabaseName(), 'page');
+
+        // Populate main temporary table
         $sql = "INSERT INTO $this->tempTable
-                SELECT page_namespace, page_title, rev_page, rev.rev_timestamp,
-                    rev.rev_minor_edit, IFNULL(rev.rev_id, 0),
-                    IFNULL(rev.rev_parent_id, 0), IFNULL(rev.rev_len, 0),
+                SELECT page_namespace, page_title, revs.rev_page, revs.rev_timestamp,
+                    revs.rev_minor_edit, IFNULL(revs.rev_id, 0),
+                    IFNULL(revs.rev_parent_id, 0), IFNULL(revs.rev_len, 0),
                     -- Remove section title from edit summary
                     TRIM(IF(
-                        INSTR(rev_comment, '/*') = 1 AND INSTR(rev_comment, '*/') > 1,
-                        SUBSTRING(rev_comment, INSTR(rev_comment, '*/') + 2),
-                        rev_comment
+                        INSTR(revs.rev_comment, '/*') = 1 AND INSTR(revs.rev_comment, '*/') > 1,
+                        SUBSTRING(revs.rev_comment, INSTR(revs.rev_comment, '*/') + 2),
+                        revs.rev_comment
                     )) AS rev_comment
-                FROM `enwiki_p`.`revision_userindex` rev
-                JOIN `enwiki_p`.`page` ON page_id = rev.rev_page
+                FROM $revisionTable revs
+                JOIN $pageTable ON page_id = revs.rev_page
+                WHERE $whereClause";
+        $this->getProjectsConnection()->query($sql);
+
+        // Populate temporary table holding parent revisions so we can get the edit sizes
+        $sql = "INSERT INTO $this->tempParentTable
+                SELECT IFNULL(parentrevs.rev_id, 0) AS rev_id,
+                    IFNULL(parentrevs.rev_len, 0) AS rev_len
+                FROM $revisionTable revs
+                LEFT JOIN $revisionTable AS parentrevs ON (revs.rev_parent_id = parentrevs.rev_id)
                 WHERE $whereClause";
         $this->getProjectsConnection()->query($sql);
     }
@@ -74,9 +97,9 @@ class EditCounterRepository extends Repository
     {
         // Set up cache.
         $cacheKey = 'pairdata.'.$project->getDatabaseName().'.'.$user->getCacheKey();
-        // if ($this->cache->hasItem($cacheKey)) {
-        //     return $this->cache->getItem($cacheKey)->get();
-        // }
+        if ($this->cache->hasItem($cacheKey)) {
+            return $this->cache->getItem($cacheKey)->get();
+        }
 
         // Prepare the queries and execute them.
         $archiveTable = $this->getTableName($project->getDatabaseName(), 'archive');
@@ -439,14 +462,18 @@ class EditCounterRepository extends Repository
         // Query.
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
         $pageTable = $this->getTableName($project->getDatabaseName(), 'page');
+        // $sql = "SELECT page_namespace, COUNT(rev_id) AS total
+        //     FROM $pageTable p JOIN $revisionTable r ON (r.rev_page = p.page_id)
+        //     WHERE r.rev_user = :id
+        //     GROUP BY page_namespace";
+        // $resultQuery = $this->getProjectsConnection()->prepare($sql);
+        // $resultQuery->bindParam(":id", $userId);
+        // $resultQuery->execute();
+        // $results = $resultQuery->fetchAll();
         $sql = "SELECT page_namespace, COUNT(rev_id) AS total
-            FROM $pageTable p JOIN $revisionTable r ON (r.rev_page = p.page_id)
-            WHERE r.rev_user = :id
-            GROUP BY page_namespace";
-        $resultQuery = $this->getProjectsConnection()->prepare($sql);
-        $resultQuery->bindParam(":id", $userId);
-        $resultQuery->execute();
-        $results = $resultQuery->fetchAll();
+                FROM $this->tempTable
+                GROUP BY page_namespace";
+        $results = $this->getProjectsConnection()->query($sql)->fetchAll();
         $namespaceTotals = array_combine(array_map(function ($e) {
             return $e['page_namespace'];
         }, $results), array_map(function ($e) {
@@ -549,18 +576,11 @@ class EditCounterRepository extends Repository
         $username = $user->getUsername();
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
         $pageTable = $this->getTableName($project->getDatabaseName(), 'page');
-        $sql =
-            "SELECT "
-            . "     YEAR(rev_timestamp) AS `year`,"
-            . "     MONTH(rev_timestamp) AS `month`,"
-            . "     page_namespace,"
-            . "     COUNT(rev_id) AS `count` "
-            .  " FROM $revisionTable JOIN $pageTable ON (rev_page = page_id)"
-            . " WHERE rev_user_text = :username"
-            . " GROUP BY YEAR(rev_timestamp), MONTH(rev_timestamp), page_namespace";
-        $resultQuery = $this->getProjectsConnection()->prepare($sql);
-        $resultQuery->bindParam(":username", $username);
-        $resultQuery->execute();
+        $sql = "SELECT YEAR(rev_timestamp) AS `year`, MONTH(rev_timestamp) AS `month`,
+                    page_namespace, COUNT(rev_id) AS `count`
+                FROM $this->tempTable
+                GROUP BY YEAR(rev_timestamp), MONTH(rev_timestamp), page_namespace";
+        $resultQuery = $this->getProjectsConnection()->query($sql);
         $totals = $resultQuery->fetchAll();
 
         $cacheItem = $this->cache->getItem($cacheKey);
@@ -590,16 +610,11 @@ class EditCounterRepository extends Repository
         $hourInterval = 2;
         $xCalc = "ROUND(HOUR(rev_timestamp)/$hourInterval) * $hourInterval";
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
-        $sql = "SELECT "
-            . "     DAYOFWEEK(rev_timestamp) AS `y`, "
-            . "     $xCalc AS `x`, "
-            . "     COUNT(rev_id) AS `r` "
-            . " FROM $revisionTable"
-            . " WHERE rev_user_text = :username"
-            . " GROUP BY DAYOFWEEK(rev_timestamp), $xCalc ";
-        $resultQuery = $this->getProjectsConnection()->prepare($sql);
-        $resultQuery->bindParam(":username", $username);
-        $resultQuery->execute();
+        $sql = "SELECT DAYOFWEEK(rev_timestamp) AS `y`,
+                    $xCalc AS `x`, COUNT(rev_id) AS `r`
+                FROM $this->tempTable
+                GROUP BY DAYOFWEEK(rev_timestamp), $xCalc";
+        $resultQuery = $this->getProjectsConnection()->query($sql);
         $totals = $resultQuery->fetchAll();
         // Scale the radii: get the max, then scale each radius.
         // This looks inefficient, but there's a max of 72 elements in this array.
@@ -636,23 +651,16 @@ class EditCounterRepository extends Repository
             return $this->cache->getItem($cacheKey)->get();
         }
 
-        // Prepare the queries and execute them.
-        $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
-        $userId = $user->getId($project);
         $sql = "SELECT AVG(sizes.size) AS average_size,
-                COUNT(CASE WHEN sizes.size < 20 THEN 1 END) AS small_edits,
-                COUNT(CASE WHEN sizes.size > 1000 THEN 1 END) AS large_edits
+                    COUNT(CASE WHEN sizes.size < 20 THEN 1 END) AS small_edits,
+                    COUNT(CASE WHEN sizes.size >= 1000 THEN 1 END) AS large_edits
                 FROM (
                     SELECT (CAST(revs.rev_len AS SIGNED) - IFNULL(parentrevs.rev_len, 0)) AS size
-                    FROM $revisionTable AS revs
-                    LEFT JOIN $revisionTable AS parentrevs ON (revs.rev_parent_id = parentrevs.rev_id)
-                    WHERE revs.rev_user = :userId
-                    ORDER BY revs.rev_timestamp DESC
-                    LIMIT 5000
+                    FROM $this->tempTable revs
+                    LEFT JOIN $this->tempParentTable AS parentrevs
+                        ON (revs.rev_parent_id = parentrevs.rev_id)
                 ) sizes";
-        $resultQuery = $this->getProjectsConnection()->prepare($sql);
-        $resultQuery->bindParam('userId', $userId);
-        $resultQuery->execute();
+        $resultQuery = $this->getProjectsConnection()->query($sql);
         $results = $resultQuery->fetchAll()[0];
 
         // Cache for 10 minutes.
@@ -663,5 +671,16 @@ class EditCounterRepository extends Repository
 
         $this->stopwatch->stop($cacheKey);
         return $results;
+    }
+
+    public function countAutomatedEdits(Project $project, User $user)
+    {
+        return $user->countAutomatedEdits(
+            $project,           // project
+            'all',              // namespace
+            '',                 // start
+            '',                 // end
+            $this->tempTable    // temp table
+        );
     }
 }

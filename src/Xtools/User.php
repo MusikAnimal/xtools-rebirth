@@ -200,11 +200,19 @@ class User extends Model
      * @param string|int [$namespace] Namespace ID or 'all'
      * @param string [$start] Start date in a format accepted by strtotime()
      * @param string [$end] End date in a format accepted by strtotime()
+     * @param string $tempTable For use with the Edit Counter. Use this table
+     *                          instead of the revision and page tables.
      * @return int Result of query, see below.
      */
-    public function countAutomatedEdits(Project $project, $namespace = 'all', $start = '', $end = '')
-    {
-        return (int) $this->getRepository()->countAutomatedEdits($project, $this, $namespace, $start, $end);
+    public function countAutomatedEdits(
+        Project $project,
+        $namespace = 'all',
+        $start = '',
+        $end = '',
+        $tempTable = null
+    ) {
+        return (int) $this->getRepository()
+            ->countAutomatedEdits($project, $this, $namespace, $start, $end, $tempTable);
     }
 
     /**

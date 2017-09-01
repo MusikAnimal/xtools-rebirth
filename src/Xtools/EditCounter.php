@@ -46,6 +46,9 @@ class EditCounter extends Model
     /** @var array Block data, with keys 'set' and 'received'. */
     protected $blocks;
 
+    /** @var integer[] Array keys are namespace IDs, values are the edit counts */
+    protected $namespaceTotals;
+
     /** @var int Number of semi-automated edits */
     protected $autoEditCount;
 
@@ -464,7 +467,7 @@ class EditCounter extends Model
         if ($this->autoEditCount) {
             return $this->autoEditCount;
         }
-        $this->autoEditCount = $this->user->countAutomatedEdits($this->project);
+        $this->autoEditCount = $this->getRepository()->countAutomatedEdits($this->project, $this->user);
         return $this->autoEditCount;
     }
 
@@ -588,8 +591,12 @@ class EditCounter extends Model
      */
     public function namespaceTotals()
     {
+        if ($this->namespaceTotals) {
+            return $this->namespaceTotals;
+        }
         $counts = $this->getRepository()->getNamespaceTotals($this->project, $this->user);
         arsort($counts);
+        $this->namespaceTotals = $counts;
         return $counts;
     }
 
