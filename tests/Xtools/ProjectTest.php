@@ -261,4 +261,35 @@ class ProjectTest extends PHPUnit_Framework_TestCase
             [$optedInProjects, 'project3', false],
         ];
     }
+
+    /**
+     * Getting a list of the admins.
+     */
+    public function testAdmins()
+    {
+        $projectRepo = $this->getMock(ProjectRepository::class);
+        $projectRepo->expects($this->once())
+            ->method('getAdmins')
+            ->willReturn([
+                ['user_name' => 'Bob', 'ug_group' => 'sysop'],
+                ['user_name' => 'Bob', 'ug_group' => 'checkuser'],
+                ['user_name' => 'Julie', 'ug_group' => 'sysop'],
+                ['user_name' => 'Herald', 'ug_group' => 'oversight'],
+                ['user_name' => 'Isosceles', 'ug_group' => 'oversight'],
+                ['user_name' => 'Isosceles', 'ug_group' => 'sysop'],
+                ['user_name' => 'Isosceles', 'ug_group' => 'steward'],
+                ['user_name' => 'Isosceles', 'ug_group' => 'bureaucrat'],
+            ]);
+        $project = new Project('testWiki');
+        $project->setRepository($projectRepo);
+        $this->assertEquals(
+            [
+                'Bob' => ['sysop', 'checkuser'],
+                'Julie' => ['sysop'],
+                'Herald' => ['oversight'],
+                'Isosceles' => ['oversight', 'sysop', 'steward', 'bureaucrat'],
+            ],
+            $project->getAdmins()
+        );
+    }
 }
