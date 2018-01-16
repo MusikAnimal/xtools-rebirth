@@ -136,4 +136,22 @@ class ArticleInfoRepository extends Repository
 
         return $transclusionCounts;
     }
+
+    /**
+     * Get ORES prediction data for the page.
+     * @see https://www.mediawiki.org/wiki/ORES
+     * @param Project $project
+     * @param int $revId Revision ID.
+     * @return array With keys 'wp10', 'draftquality', 'goodfaith', 'damaging'.
+     */
+    public function getORESData(Project $project, $revId)
+    {
+        $client = new GuzzleHttp\Client();
+        $dbName = $project->getDatabaseName();
+
+        $url = "https://ores.wikimedia.org/v3/scores/$dbName/$revId";
+        $res = $client->request('GET', $url, ['http_errors' => false]);
+
+        return json_decode($res->getBody()->getContents(), true)[$dbName]['scores'][$revId];
+    }
 }

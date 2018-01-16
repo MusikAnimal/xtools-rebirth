@@ -138,6 +138,9 @@ class ArticleInfo extends Model
     /** @var array Number of categories, templates and files on the page. */
     protected $transclusionData;
 
+    /** @var array Quality predictions from ORES. */
+    protected $oresData;
+
     /**
      * ArticleInfo constructor.
      * @param Page $page The page to process.
@@ -1475,5 +1478,56 @@ class ArticleInfo extends Model
     public function getNumFiles()
     {
         return $this->getTransclusionData()['files'];
+    }
+
+    /**
+     * Get ORES prediction data for the page.
+     * @return array With keys 'wp10', 'draftquality', 'good_faith', 'damaging'.
+     */
+    public function getORES()
+    {
+        if ($this->oresData) {
+            return $this->oresData;
+        }
+
+        $ret = $this->getRepository()->getORESData(
+            $this->page->getProject(),
+            $this->lastEdit->getId()
+        );
+
+        $draftQuality = $ret['draftquality']['score']['prediction'];
+        $goodFaith = $ret['goodfaith']['score']['prediction'] ? 'true' : 'false';
+        $damaging = $ret['damaging']['score']['prediction'] ? 'true' : 'false';
+        $project = $this->page->getProject();
+
+        $oresAssessment = $ret['wp10']['score']['prediction'];
+        $assessmentConfig = $project->getRepository()
+            ->getAssessmentsConfig($project->getDomain())['class'][$oresAssessment];
+        $assessment = [
+            'value' => $oresAssessment,
+            'category' => $assessmentConfig['category'],
+            'badge' => $project->getAssessmentBadgeURL($oresAssessment),
+        ];
+
+        $this->oresData = [
+            'wp10' => [
+                'score' => $assessment,
+                'probability' => $ret['wp10']['score']['probability'][$oresAssessment] * 100,
+            ],
+            'draftquality' => [
+                'score' => $draftQuality,
+                'probability' => $ret['draftquality']['score']['probability'][$draftQuality] * 100,
+            ],
+            'goodfaith' => [
+                'score' => $goodFaith,
+                'probability' => $ret['goodfaith']['score']['probability'][$goodFaith] * 100,
+            ],
+            'damaging' => [
+                'score' => $damaging,
+                'probability' => $ret['damaging']['score']['probability'][$damaging] * 100,
+            ],
+        ];
+
+        return $this->oresData;
     }
 }

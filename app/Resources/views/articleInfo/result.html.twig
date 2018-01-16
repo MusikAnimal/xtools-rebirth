@@ -867,38 +867,97 @@
         {# ======================== ASSESSMENTS ======================== #}
         {% if not (ai.hasDateRange) and ai.assessments and not (page.isMainPage) %}
         {% set content %}
-            <table class="table table-bordered table-hover table-striped assessments-table">
-                <thead><tr>
-                    {% for key in ['wikiproject', 'assessment', 'importance'] %}
-                        <th>
-                            <span class="sort-link sort-link--{{ key }}" data-column="{{ key }}">
-                                {{ msg(key)|capitalize_first }}
-                                <span class="glyphicon glyphicon-sort"></span>
-                            </span>
-                        </th>
+            <div class="col-lg-6">
+                <table class="table table-bordered table-hover table-striped assessments-table">
+                    <caption>Community assessment</caption>
+                    <thead><tr>
+                        {% for key in ['wikiproject', 'assessment', 'importance'] %}
+                            <th>
+                                <span class="sort-link sort-link--{{ key }}" data-column="{{ key }}">
+                                    {{ msg(key)|capitalize_first }}
+                                    <span class="glyphicon glyphicon-sort"></span>
+                                </span>
+                            </th>
+                        {% endfor %}
+                    </tr></thead>
+                    <tbody>
+                    {% for wikiproject, assessment in ai.assessments.wikiprojects %}
+                        <tr>
+                            <td class="sort-entry--wikiproject" data-value="{{ wikiproject }}">
+                                {{ wiki.pageLinkRaw(ai.assessments.wikiproject_prefix ~ wikiproject, project, wikiproject) }}
+                            </td>
+                            <td style="background:{{ assessment.class.color }}" class="sort-entry--assessment" data-value="{{ assessment.class.value }}">
+                                {% set assessment_value %}
+                                    <img alt="{{ assessment.class.value }}" src="{{ assessment.class.badge }}" class="assessment-badge" />
+                                    {{ assessment.class.value }}
+                                {% endset %}
+                                {{ wiki.pageLinkRaw(assessment.class.category, project, assessment_value) }}
+                            </td>
+                            <td style="background:{{ assessment.importance.color }}" class="sort-entry--importance" data-value="{{ assessment.importance.weight }}">
+                                {% set importance_label = assessment.importance ? assessment.importance.value : '???' %}
+                                {{ wiki.pageLinkRaw(assessment.importance.category, project, importance_label) }}
+                            </td>
+                        </tr>
                     {% endfor %}
-                </tr></thead>
-                <tbody>
-                {% for wikiproject, assessment in ai.assessments.wikiprojects %}
-                    <tr>
-                        <td class="sort-entry--wikiproject" data-value="{{ wikiproject }}">
-                            {{ wiki.pageLinkRaw(ai.assessments.wikiproject_prefix ~ wikiproject, project, wikiproject) }}
-                        </td>
-                        <td style="background:{{ assessment.class.color }}" class="sort-entry--assessment" data-value="{{ assessment.class.value }}">
-                            {% set assessment_value %}
-                                <img alt="{{ assessment.class.value }}" src="{{ assessment.class.badge }}" class="assessment-badge" />
-                                {{ assessment.class.value }}
-                            {% endset %}
-                            {{ wiki.pageLinkRaw(assessment.class.category, project, assessment_value) }}
-                        </td>
-                        <td style="background:{{ assessment.importance.color }}" class="sort-entry--importance" data-value="{{ assessment.importance.weight }}">
-                            {% set importance_label = assessment.importance ? assessment.importance.value : '???' %}
-                            {{ wiki.pageLinkRaw(assessment.importance.category, project, importance_label) }}
-                        </td>
-                    </tr>
-                {% endfor %}
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
+            </div>
+            <span class="stat-list col-lg-6">
+                <table class="table ores-table">
+                    <caption>ORES (automated)</caption>
+                    <tbody>
+                        {% if ai.ores.wp10 is defined %}
+                            <tr>
+                                <td>Wikipedia 1.0</td>
+                                <td>
+                                    {% set assessment_value %}
+                                        {% if ai.ores.wp10.score.badge is defined %}
+                                            <img alt="{{ ai.ores.wp10.score.value }}" src="{{ ai.ores.wp10.score.badge }}" class="assessment-badge" />
+                                            {{ ai.ores.wp10.score.value }}
+                                        {% else %}
+                                            {{ ai.ores.wp10.score.value }}
+                                        {% endif %}
+                                    {% endset %}
+                                    {{ wiki.pageLinkRaw(ai.ores.wp10.score.category, project, assessment_value) }}
+                                </td>
+                            </tr>
+                        {% endif %}
+                        <tr>
+                            <td>Draft quality</td>
+                            <td>
+                                {% if ai.ores.draftquality.score %}
+                                    <span class="text-success">&check;</span>
+                                {% else %}
+                                    <span class="text-danger">&cross;</span>
+                                {% endif %}
+                                ({{ ai.ores.draftquality.probability|percent_format }} confidence)
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Good faith</td>
+                            <td>
+                                {% if ai.ores.goodfaith.score == 'true' %}
+                                    <span class="text-success">&check;</span>
+                                {% else %}
+                                    <span class="text-danger">&cross;</span>
+                                {% endif %}
+                                ({{ ai.ores.goodfaith.probability|percent_format }} confidence)
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Damaging</td>
+                            <td>
+                                {% if ai.ores.damaging.score == 'true' %}
+                                    <span class="text-success">&check;</span>
+                                {% else %}
+                                    <span class="text-danger">&cross;</span>
+                                {% endif %}
+                                ({{ ai.ores.damaging.probability|percent_format }} confidence)
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </span>
         {% endset %}
         {{ layout.content_block('assessments', content) }}
         {% endif %}

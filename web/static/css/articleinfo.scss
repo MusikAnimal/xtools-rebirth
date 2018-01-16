@@ -94,6 +94,10 @@
     .authorship-desc {
         margin-bottom: 20px;
     }
+
+    .assessments-table caption {
+        text-align: center;
+    }
 }
 
 @media (max-width: $bootstrap-sm) {
