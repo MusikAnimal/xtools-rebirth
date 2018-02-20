@@ -34,53 +34,57 @@ class EditCounterRepository extends Repository
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
         $sql = "
             -- Revision counts.
-            (SELECT 'deleted' AS `key`, COUNT(ar_id) AS val FROM $archiveTable
+            (
+                SELECT 'deleted' AS `key`, COUNT(ar_id) AS val FROM $archiveTable
                 WHERE ar_user = :userId
             ) UNION (
-            SELECT 'live' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'live' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId
             ) UNION (
-            SELECT 'day' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'day' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
             ) UNION (
-            SELECT 'week' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'week' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
             ) UNION (
-            SELECT 'month' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'month' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
             ) UNION (
-            SELECT 'year' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'year' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 YEAR)
             ) UNION (
-            SELECT 'with_comments' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'with_comments' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_comment != ''
             ) UNION (
-            SELECT 'minor' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
+                SELECT 'minor' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
                 WHERE rev_user = :userId AND rev_minor_edit = 1
+            ) UNION (
+                SELECT COUNT(rev_id) AS `mobile` FROM $revisionTable
+                WHERE rev_user = :userId AND ct_tag = 'mobile web edit'
 
             -- Dates.
             ) UNION (
-            SELECT 'first' AS `key`, rev_timestamp AS `val` FROM $revisionTable
+                SELECT 'first' AS `key`, rev_timestamp AS `val` FROM $revisionTable
                 WHERE rev_user = :userId ORDER BY rev_timestamp ASC LIMIT 1
             ) UNION (
-            SELECT 'last' AS `key`, rev_timestamp AS `date` FROM $revisionTable
+                SELECT 'last' AS `key`, rev_timestamp AS `date` FROM $revisionTable
                 WHERE rev_user = :userId ORDER BY rev_timestamp DESC LIMIT 1
 
             -- Page counts.
             ) UNION (
-            SELECT 'edited-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
+                SELECT 'edited-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
                 FROM $revisionTable
                 WHERE rev_user = :userId
             ) UNION (
-            SELECT 'edited-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
+                SELECT 'edited-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
                 FROM $archiveTable
                 WHERE ar_user = :userId
             ) UNION (
-            SELECT 'created-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
+                SELECT 'created-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
                 FROM $revisionTable
                 WHERE rev_user = :userId AND rev_parent_id = 0
             ) UNION (
-            SELECT 'created-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
+                SELECT 'created-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
                 FROM $archiveTable
                 WHERE ar_user = :userId AND ar_parent_id = 0
             )
