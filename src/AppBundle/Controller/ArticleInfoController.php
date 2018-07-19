@@ -41,25 +41,19 @@ class ArticleInfoController extends XtoolsController
      * @Route("/articleinfo/", name="articleInfoSlash")
      * @Route("/articleinfo/index.php", name="articleInfoIndexPhp")
      * @Route("/articleinfo/{project}", name="ArticleInfoProject")
-     * @param Request $request The HTTP request.
      * @return Response
      */
-    public function indexAction(Request $request)
+    public function indexAction()
     {
-        $params = $this->parseQueryParams($request);
-
-        if (isset($params['project']) && isset($params['article'])) {
-            return $this->redirectToRoute('ArticleInfoResult', $params);
+        if (isset($this->params['project']) && isset($this->params['article'])) {
+            return $this->redirectToRoute('ArticleInfoResult', $this->params);
         }
-
-        // Convert the given project (or default project) into a Project instance.
-        $params['project'] = $this->getProjectFromQuery($params);
 
         return $this->render('articleInfo/index.html.twig', [
             'xtPage' => 'articleinfo',
             'xtPageTitle' => 'tool-articleinfo',
             'xtSubtitle' => 'tool-articleinfo-desc',
-            'project' => $params['project'],
+            'project' => $this->project,
         ]);
     }
 
@@ -96,7 +90,7 @@ class ArticleInfoController extends XtoolsController
             // Check for errors.
             $errorOutput = $process->getErrorOutput();
             if ($errorOutput != '') {
-                $response = new \Symfony\Component\HttpFoundation\Response(
+                $response = new Response(
                     "Error generating uglified JS. The server said:\n\n$errorOutput"
                 );
                 return $response;
@@ -113,7 +107,7 @@ class ArticleInfoController extends XtoolsController
                 "\n * Released under GPL v3 license.\n */\n" . $rendered;
         }
 
-        $response = new \Symfony\Component\HttpFoundation\Response($rendered);
+        $response = new Response($rendered);
         $response->headers->set('Content-Type', 'text/javascript');
         return $response;
     }
@@ -139,12 +133,10 @@ class ArticleInfoController extends XtoolsController
     {
         list($article, $start, $end) = $this->extractDatesFromParams($article, $start, $end);
 
-        // In this case only the project is validated.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
-            return $ret;
-        } else {
-            $project = $ret[0];
+        // First validate project.
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
+            return $project;
         }
 
         $page = $this->getAndValidatePage($project, $article);
@@ -233,12 +225,10 @@ class ArticleInfoController extends XtoolsController
      */
     public function textsharesResultAction(Request $request, $article)
     {
-        // In this case only the project is validated.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
-            return $ret;
-        } else {
-            $project = $ret[0];
+        // First validate project.
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
+            return $project;
         }
 
         $page = $this->getAndValidatePage($project, $article);
@@ -421,13 +411,10 @@ class ArticleInfoController extends XtoolsController
     {
         $this->recordApiUsage('page/prose');
 
-        // In this case only the project is validated.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
-            return $ret;
-        } else {
-            /** @var Project $project */
-            $project = $ret[0];
+        // First validate project.
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
+            return $project;
         }
 
         $page = $this->getAndValidatePage($project, $article);
@@ -474,14 +461,12 @@ class ArticleInfoController extends XtoolsController
         $this->recordApiUsage('page/assessments');
 
         // First validate project.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
             return new JsonResponse(
                 ['error' => 'Invalid project'],
                 Response::HTTP_NOT_FOUND
             );
-        } else {
-            $project = $ret[0];
         }
 
         $pages = explode('|', $articles);
@@ -525,14 +510,12 @@ class ArticleInfoController extends XtoolsController
         $this->recordApiUsage('page/links');
 
         // First validate project.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
             return new JsonResponse(
                 ['error' => 'Invalid project'],
                 Response::HTTP_NOT_FOUND
             );
-        } else {
-            $project = $ret[0];
         }
 
         $page = $this->getAndValidatePage($project, $article);
@@ -572,15 +555,12 @@ class ArticleInfoController extends XtoolsController
         list($article, $start, $end, $limit) = $this->extractDatesFromParams($article, $start, $end, $limit);
 
         // First validate project.
-        $ret = $this->validateProjectAndUser($request);
-        if ($ret instanceof RedirectResponse) {
+        $project = $this->validateProject($request);
+        if ($project instanceof RedirectResponse) {
             return new JsonResponse(
                 ['error' => 'Invalid project'],
                 Response::HTTP_NOT_FOUND
             );
-        } else {
-            /** @var Project $project */
-            $project = $ret[0];
         }
 
         $page = $this->getAndValidatePage($project, $article);

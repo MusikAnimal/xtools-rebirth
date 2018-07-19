@@ -5,7 +5,10 @@
 
 namespace AppBundle\EventSubscriber;
 
+use AppBundle\Exception\XtoolsHttpException;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\GetResponseForExceptionEvent;
 use Symfony\Component\Templating\EngineInterface;
@@ -53,30 +56,49 @@ class ExceptionListener
         // not the one Twig put on top of it.
         $prevException = $exception->getPrevious();
 
-        if (!($exception instanceof Twig_Error_Runtime && $prevException !== null)) {
-            return;
+        if ($exception instanceof XtoolsHttpException) {
+            $response = $this->getXtoolsHttpResponse($exception);
+        } else if ($exception instanceof Twig_Error_Runtime && $prevException !== null) {
+            $response = $this->getTwigErrorReponse($prevException);
+        } else {
+            throw $exception;
         }
-
-        if ($this->environment !== 'prod') {
-            throw $prevException;
-        }
-
-        // Log the exception, since we're handling it and it won't automatically be logged.
-        $file = explode('/', $prevException->getFile());
-        $this->logger->error(
-            '>>> CRITICAL (\''.$prevException->getMessage().'\' - '.
-            end($file).' - line '.$prevException->getLine().')'
-        );
-
-        $response = new Response(
-            $this->templateEngine->render('TwigBundle:Exception:error.html.twig', [
-                'status_code' => 500,
-                'status_text' => 'Internal Server Error',
-                'exception' => $prevException,
-            ])
-        );
 
         // sends the modified response object to the event
         $event->setResponse($response);
+    }
+
+    private function getXtoolsHttpResponse(XtoolsHttpException $exception)
+    {
+        if ($exception->isApi()) {
+            return new JsonResponse(array_merge(
+                ['error' => $exception->getMessage()],
+                $exception->getParams()
+            ), Response::HTTP_NOT_FOUND);
+        }
+
+        return new RedirectResponse($exception->getRedirectUrl());
+    }
+
+    private function getTwigErrorReponse($exception)
+    {
+        if ($this->environment !== 'prod') {
+            throw $exception;
+        }
+
+        // Log the exception, since we're handling it and it won't automatically be logged.
+        $file = explode('/', $exception->getFile());
+        $this->logger->error(
+            '>>> CRITICAL (\''.$exception->getMessage().'\' - '.
+            end($file).' - line '.$exception->getLine().')'
+        );
+
+        return new Response(
+            $this->templateEngine->render('TwigBundle:Exception:error.html.twig', [
+                'status_code' => 500,
+                'status_text' => 'Internal Server Error',
+                'exception' => $exception,
+            ])
+        );
     }
 }

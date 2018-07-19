@@ -6,14 +6,19 @@
 
 namespace AppBundle\Controller;
 
+use AppBundle\Exception\XtoolsHttpException;
+use DateTime;
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RedirectResponse;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Xtools\ProjectRepository;
 use Xtools\UserRepository;
 use Xtools\Project;
 use Xtools\Page;
 use Xtools\PageRepository;
+use Xtools\User;
 
 /**
  * XtoolsController supplies a variety of methods around parsing and validing
@@ -23,24 +28,116 @@ use Xtools\PageRepository;
  */
 abstract class XtoolsController extends Controller
 {
+    /** @var Request The request object. */
+    protected $request;
+
+    /** @var array Hash of params parsed from the Request. */
+    protected $params;
+
+    /** @var bool Whether this is a request to an API action. */
+    protected $isApi;
+
+    /** @var Project|null Relevant Project parsed from the Request. */
+    protected $project;
+
+    /** @var User|null Relevant User parsed from the Request. */
+    protected $user;
+
+    /** @var Page|null Relevant Page parsed from the Request. */
+    protected $page;
+
+    /** @var DateTime Start date parsed from the Request. */
+    protected $start;
+
+    /** @var DateTime End date parsed from the Request. */
+    protected $end;
+
     /**
-     * Require the tool's index route (intial form) be defined here. This should also
+     * Require the tool's index route (initial form) be defined here. This should also
      * be the name of the associated model, if present.
      * @return string
      */
     abstract protected function getIndexRoute();
 
     /**
-     * Given the request object, parse out common parameters. These include the
+     * XtoolsController constructor.
+     * @param RequestStack $requestStack
+     * @param ContainerInterface $container
+     */
+    public function __construct(RequestStack $requestStack, ContainerInterface $container)
+    {
+        $this->request = $requestStack->getCurrentRequest();
+        $this->container = $container;
+        $this->params = $this->parseQueryParams($this->request);
+
+        $pattern = "#::([a-zA-Z]*)Action#";
+        $matches = [];
+        preg_match($pattern, $this->request->get('_controller'), $matches);
+        $controllerAction = $matches[1];
+
+        $this->isApi = substr($controllerAction, -3) === 'Api';
+
+        if ($controllerAction === 'index') {
+            $this->project = $this->getProjectFromQuery();
+        } else {
+            $this->setProperties();
+        }
+    }
+
+    private function setProperties()
+    {
+        if (isset($this->params['project'])) {
+            $this->project = $this->validateProject($this->params['project']);
+        }
+        if (isset($this->params['username'])) {
+            $this->user = $this->validateUser($this->params['user']);
+        }
+        if (isset($this->params['page'])) {
+            $this->page = $this->validatePage($this->params['page']);
+        }
+    }
+
+    /**
+     * Validate the given project, returning a Project if it is valid or false otherwise.
+     * @param string $projectQuery Project domain or database name.
+     * @return Project|RedirectResponse|false
+     * @throws XtoolsHttpException
+     */
+    public function validateProject($projectQuery)
+    {
+        /** @var Project $project */
+        $project = ProjectRepository::getProject($projectQuery, $this->container);
+
+        if ($project->exists()) {
+            return $project;
+        }
+
+        $this->addFlash('danger', ['invalid-project', $this->params['project']]);
+
+        $originalParams = $this->params;
+
+        // Remove invalid parameter.
+        unset($this->params['project']);
+
+        // Throw exception which will redirect back to index page.
+        throw new XtoolsHttpException(
+            'Invalid project',
+            $this->generateUrl($this->getIndexRoute(), $this->params),
+            $originalParams,
+            $this->isApi
+        );
+    }
+
+    /**
+     * Parse out common parameters from the request. These include the
      * 'project', 'username', 'namespace' and 'article', along with their legacy
      * counterparts (e.g. 'lang' and 'wiki').
-     * @param  Request $request
      * @return string[] Normalized parameters (no legacy params).
      */
-    public function parseQueryParams(Request $request)
+    public function parseQueryParams()
     {
         /** @var string[] Each parameter and value that was detected. */
-        $params = $this->getParams($request);
+        $params = $this->getParams($this->request);
 
         // Covert any legacy parameters, if present.
         $params = $this->convertLegacyParams($params);
@@ -55,17 +152,16 @@ abstract class XtoolsController extends Controller
     /**
      * Get a Project instance from the project string, using defaults if the
      * given project string is invalid.
-     * @param  string[] $params Query params.
      * @return Project
      */
-    public function getProjectFromQuery($params)
+    public function getProjectFromQuery()
     {
         // Set default project so we can populate the namespace selector
         // on index pages.
-        if (empty($params['project'])) {
+        if (empty($this->params['project'])) {
             $project = $this->container->getParameter('default_project');
         } else {
-            $project = $params['project'];
+            $project = $this->params['project'];
         }
 
         $projectData = ProjectRepository::getProject($project, $this->container);
@@ -82,92 +178,32 @@ abstract class XtoolsController extends Controller
     }
 
     /**
-     * If the project and username in the given params hash are valid, Project and User instances
-     * are returned. User validation only occurs if 'username' is in the params.
-     * Otherwise a redirect is returned that goes back to the index page.
-     * @param Request $request The HTTP request.
-     * @param string $tooHighEditCountAction If the requested user has more than the configured
-     *   max edit count, they will be redirect to this route, passing in available params.
-     * @return RedirectResponse|array Array contains [Project|null, User|null]
-     */
-    public function validateProjectAndUser(Request $request, $tooHighEditCountAction = null)
-    {
-        $params = $this->getParams($request);
-
-        $projectData = $this->validateProject($params);
-        if ($projectData instanceof RedirectResponse) {
-            return $projectData;
-        }
-
-        $userData = null;
-
-        if (isset($params['username'])) {
-            $userData = $this->validateUser($params, $projectData, $tooHighEditCountAction);
-            if ($userData instanceof RedirectResponse) {
-                return $userData;
-            }
-        }
-
-        return [$projectData, $userData];
-    }
-
-    /**
-     * Validate the given project, returning a Project if it is valid or false otherwise.
-     * @param string|string[] $params Project domain or database name, or params hash as
-     *   retrieved by self::getParams().
-     * @return Project|RedirectResponse|false
-     */
-    public function validateProject($params)
-    {
-        if (is_string($params)) {
-            $params = ['project' => $params];
-        }
-
-        $projectData = ProjectRepository::getProject($params['project'], $this->container);
-
-        if (!$projectData->exists()) {
-            $this->addFlash('danger', ['invalid-project', $params['project']]);
-            unset($params['project']); // Remove invalid parameter.
-
-            return $this->redirectToRoute($this->getIndexRoute(), $params);
-        }
-
-        return $projectData;
-    }
-
-    /**
      * Validate the given user, returning a User or Redirect if they don't exist.
-     * @param string|string[] $params Username or params hash as retrieved by self::getParams().
-     * @param Project $project Project to get check against.
      * @param string $tooHighEditCountAction If the requested user has more than the configured
      *   max edit count, they will be redirect to this route, passing in available params.
      * @return RedirectResponse|\Xtools\User
      */
-    public function validateUser($params, Project $project, $tooHighEditCountAction = null)
+    public function validateUser($tooHighEditCountAction = null)
     {
-        if (is_string($params)) {
-            $params = ['username' => $params];
-        }
-
-        $userData = UserRepository::getUser($params['username'], $this->container);
+        $user = UserRepository::getUser($this->params['username'], $this->container);
 
         // Allow querying for any IP, currently with no edit count limitation...
         // Once T188677 is resolved IPs will be affected by the EXPLAIN results.
-        if ($userData->isAnon()) {
-            return $userData;
+        if ($user->isAnon()) {
+            return $user;
         }
 
         // Don't continue if the user doesn't exist.
-        if (!$userData->existsOnProject($project)) {
+        if (!$user->existsOnProject($this->project)) {
             $this->addFlash('danger', 'user-not-found');
-            unset($params['username']);
-            return $this->redirectToRoute($this->getIndexRoute(), $params);
+            unset($this->params['username']);
+            return $this->redirectToRoute($this->getIndexRoute(), $this->params);
         }
 
         // Reject users with a crazy high edit count.
-        if ($tooHighEditCountAction && $userData->hasTooManyEdits($project)) {
+        if ($tooHighEditCountAction && $user->hasTooManyEdits($project)) {
             // FIXME: i18n!!
-            $this->addFlash('danger', ['too-many-edits', number_format($userData->maxEdits())]);
+            $this->addFlash('danger', ['too-many-edits', number_format($user->maxEdits())]);
 
             // If redirecting to a different controller, show an informative message accordingly.
             if ($tooHighEditCountAction !== $this->getIndexRoute()) {
@@ -176,24 +212,23 @@ abstract class XtoolsController extends Controller
                 $this->addFlash('info', ['too-many-edits-redir', 'Simple Counter']);
             } else {
                 // Redirecting back to index, so remove username (otherwise we'd get a redirect loop).
-                unset($params['username']);
+                unset($this->params['username']);
             }
 
-            return $this->redirectToRoute($tooHighEditCountAction, $params);
+            return $this->redirectToRoute($tooHighEditCountAction, $this->params);
         }
 
-        return $userData;
+        return $user;
     }
 
     /**
      * Get a Page instance from the given page title, and validate that it exists.
-     * @param  Project $project
-     * @param  string $pageTitle
+     * @param string $pageTitle
      * @return Page|RedirectResponse Page or redirect back to index if page doesn't exist.
      */
-    public function getAndValidatePage(Project $project, $pageTitle)
+    public function validatePage($pageTitle)
     {
-        $page = new Page($project, $pageTitle);
+        $page = new Page($this->project, $pageTitle);
         $pageRepo = new PageRepository();
         $pageRepo->setContainer($this->container);
         $page->setRepository($pageRepo);
@@ -277,9 +312,9 @@ abstract class XtoolsController extends Controller
      * Get UTC timestamps from given start and end string parameters.
      * This also makes $start on month before $end if not present,
      * and makes $end the current time if not present.
-     * @param  string $start
-     * @param  string $end
-     * @param  bool   $useDefaults Whether to use defaults if the values
+     * @param string $start
+     * @param string $end
+     * @param bool $useDefaults Whether to use defaults if the values
      *   are blank. The start date is set to one month before the end date,
      *   and the end date is set to the present.
      * @return mixed[] Start and end date as UTC timestamps or 'false' if empty.
@@ -313,7 +348,7 @@ abstract class XtoolsController extends Controller
 
     /**
      * Given the params hash, normalize any legacy parameters to thier modern equivalent.
-     * @param  string[] $params
+     * @param string[] $params
      * @return string[]
      */
     private function convertLegacyParams($params)
@@ -365,6 +400,7 @@ abstract class XtoolsController extends Controller
      */
     public function recordApiUsage($endpoint)
     {
+        /** @var \Doctrine\DBAL\Connection $conn */
         $conn = $this->container->get('doctrine')
             ->getManager('default')
             ->getConnection();
@@ -418,5 +454,14 @@ abstract class XtoolsController extends Controller
         $response->headers->set('Content-Type', $contentType);
 
         return $response;
+    }
+
+    private function redirectToIndex($params = [], $flash = null, $flashContents = null)
+    {
+        if ($flash) {
+            $this->addFlash($flash, $flashContents);
+        }
+
+        // Somehow redirect...
     }
 }
