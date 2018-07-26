@@ -6,7 +6,6 @@
 namespace Xtools;
 
 use Doctrine\DBAL\Connection;
-use Doctrine\DBAL\DBALException;
 use Doctrine\DBAL\Exception\DriverException;
 use Doctrine\DBAL\Query\QueryBuilder;
 use Mediawiki\Api\MediawikiApi;

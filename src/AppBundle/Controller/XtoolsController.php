@@ -7,7 +7,6 @@
 namespace AppBundle\Controller;
 
 use AppBundle\Exception\XtoolsHttpException;
-use DateTime;
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\Request;
@@ -31,6 +30,8 @@ abstract class XtoolsController extends Controller
     /** @var Request The request object. */
     protected $request;
 
+    protected $controllerAction;
+
     /** @var array Hash of params parsed from the Request. */
     protected $params;
 
@@ -46,11 +47,15 @@ abstract class XtoolsController extends Controller
     /** @var Page|null Relevant Page parsed from the Request. */
     protected $page;
 
-    /** @var DateTime Start date parsed from the Request. */
-    protected $start;
+    /** @var int|false Start date parsed from the Request. */
+    protected $start = false;
 
-    /** @var DateTime End date parsed from the Request. */
-    protected $end;
+    /** @var int|false End date parsed from the Request. */
+    protected $end = false;
+
+    protected $tooHighEditCountAction;
+
+    protected $tooHighEditCountActionBlacklist = [];
 
     /**
      * Require the tool's index route (initial form) be defined here. This should also
@@ -73,11 +78,11 @@ abstract class XtoolsController extends Controller
         $pattern = "#::([a-zA-Z]*)Action#";
         $matches = [];
         preg_match($pattern, $this->request->get('_controller'), $matches);
-        $controllerAction = $matches[1];
+        $this->controllerAction = $matches[1];
 
-        $this->isApi = substr($controllerAction, -3) === 'Api';
+        $this->isApi = substr($this->controllerAction, -3) === 'Api';
 
-        if ($controllerAction === 'index') {
+        if ($this->controllerAction === 'index') {
             $this->project = $this->getProjectFromQuery();
         } else {
             $this->setProperties();
@@ -90,10 +95,17 @@ abstract class XtoolsController extends Controller
             $this->project = $this->validateProject($this->params['project']);
         }
         if (isset($this->params['username'])) {
-            $this->user = $this->validateUser($this->params['user']);
+            $this->user = $this->validateUser($this->params['username']);
         }
         if (isset($this->params['page'])) {
             $this->page = $this->validatePage($this->params['page']);
+        }
+
+        // Dates.
+        $start = isset($this->params['start']) ? $this->params['start'] : false;
+        $end = isset($this->params['end']) ? $this->params['end'] : false;
+        if ($start || $end) {
+            list($this->start, $this->end) = $this->getUTCFromDateParams($start, $end);
         }
     }
 
@@ -130,7 +142,7 @@ abstract class XtoolsController extends Controller
 
     /**
      * Parse out common parameters from the request. These include the
-     * 'project', 'username', 'namespace' and 'article', along with their legacy
+     * 'project', 'username', 'namespace' and 'page', along with their legacy
      * counterparts (e.g. 'lang' and 'wiki').
      * @return string[] Normalized parameters (no legacy params).
      */
@@ -179,13 +191,14 @@ abstract class XtoolsController extends Controller
 
     /**
      * Validate the given user, returning a User or Redirect if they don't exist.
-     * @param string $tooHighEditCountAction If the requested user has more than the configured
-     *   max edit count, they will be redirect to this route, passing in available params.
+     * @param string $username
+     * @param string|null $tooHighEditCountAction If the requested user has more than the configured
+     *   max edit count, they will be redirected to this route, passing in available params.
      * @return RedirectResponse|\Xtools\User
      */
-    public function validateUser($tooHighEditCountAction = null)
+    public function validateUser($username)
     {
-        $user = UserRepository::getUser($this->params['username'], $this->container);
+        $user = UserRepository::getUser($username, $this->container);
 
         // Allow querying for any IP, currently with no edit count limitation...
         // Once T188677 is resolved IPs will be affected by the EXPLAIN results.
@@ -193,20 +206,30 @@ abstract class XtoolsController extends Controller
             return $user;
         }
 
+        $originalParams = $this->params;
+
         // Don't continue if the user doesn't exist.
         if (!$user->existsOnProject($this->project)) {
             $this->addFlash('danger', 'user-not-found');
             unset($this->params['username']);
-            return $this->redirectToRoute($this->getIndexRoute(), $this->params);
+            throw new XtoolsHttpException(
+                'User not found',
+                $this->generateUrl($this->getIndexRoute(), $this->params),
+                $originalParams,
+                $this->isApi
+            );
         }
 
         // Reject users with a crazy high edit count.
-        if ($tooHighEditCountAction && $user->hasTooManyEdits($project)) {
+        if (isset($this->tooHighEditCountAction) &&
+            !in_array($this->controllerAction, $this->tooHighEditCountActionBlacklist) &&
+            $user->hasTooManyEdits($this->project)
+        ) {
             // FIXME: i18n!!
             $this->addFlash('danger', ['too-many-edits', number_format($user->maxEdits())]);
 
             // If redirecting to a different controller, show an informative message accordingly.
-            if ($tooHighEditCountAction !== $this->getIndexRoute()) {
+            if ($this->tooHighEditCountAction !== $this->getIndexRoute()) {
                 // FIXME: This is currently only done for Edit Counter, redirecting to Simple Edit Counter,
                 // so this bit is hardcoded. We need to instead give the i18n key of the route.
                 $this->addFlash('info', ['too-many-edits-redir', 'Simple Counter']);
@@ -215,7 +238,12 @@ abstract class XtoolsController extends Controller
                 unset($this->params['username']);
             }
 
-            return $this->redirectToRoute($tooHighEditCountAction, $this->params);
+            throw new XtoolsHttpException(
+                'User has made too many edits! Maximum '.$user->maxEdits(),
+                $this->generateUrl($this->tooHighEditCountAction, $this->params),
+                $originalParams,
+                $this->isApi
+            );
         }
 
         return $user;
@@ -237,7 +265,7 @@ abstract class XtoolsController extends Controller
             return $page;
         }
 
-        $this->addFlash('danger', ['no-result', $this->params['article']]);
+        $this->addFlash('danger', ['no-result', $this->params['page']]);
 
         $originalParams = $this->params;
 
@@ -283,7 +311,7 @@ abstract class XtoolsController extends Controller
             'project',
             'username',
             'namespace',
-            'article',
+            'page',
             'categories',
             'redirects',
             'deleted',
@@ -295,7 +323,7 @@ abstract class XtoolsController extends Controller
             // Legacy parameters.
             'user',
             'name',
-            'page',
+            'article',
             'wiki',
             'wikifam',
             'lang',
@@ -320,29 +348,25 @@ abstract class XtoolsController extends Controller
     }
 
     /**
-     * Get UTC timestamps from given start and end string parameters.
-     * This also makes $start on month before $end if not present,
-     * and makes $end the current time if not present.
+     * Get UTC timestamps from given start and end string parameters. This also makes $start on month before
+     * $end if not present, and makes $end the current time if not present.
      * @param string $start
      * @param string $end
-     * @param bool $useDefaults Whether to use defaults if the values
-     *   are blank. The start date is set to one month before the end date,
-     *   and the end date is set to the present.
+     * @param bool $useDefaults Whether to use defaults if the values are blank. The start date is set to one month
+     *   before the end date, and the end date is set to the present.
      * @return mixed[] Start and end date as UTC timestamps or 'false' if empty.
      */
-    public function getUTCFromDateParams($start, $end, $useDefaults = true)
+    public function getUTCFromDateParams($start, $end, $useDefaults = false)
     {
         $start = strtotime($start);
         $end = strtotime($end);
 
-        // Use current time if end is not present (and is required),
-        // or if it exceeds the current time.
+        // Use current time if end is not present (and is required), or if it exceeds the current time.
         if (($useDefaults && $end === false) || $end > time()) {
             $end = time();
         }
 
-        // Default to one month before end time if start is not present,
-        // as is not optional.
+        // Default to one month before end time if start is not present, as is not optional.
         if ($useDefaults && $start === false) {
             $start = strtotime('-1 month', $end);
         }
@@ -367,7 +391,7 @@ abstract class XtoolsController extends Controller
         $paramMap = [
             'user' => 'username',
             'name' => 'username',
-            'page' => 'article',
+            'article' => 'page',
             'begin' => 'start',
 
             // Copy super legacy project params to legacy so we can concatenate below.
@@ -465,14 +489,5 @@ abstract class XtoolsController extends Controller
         $response->headers->set('Content-Type', $contentType);
 
         return $response;
-    }
-
-    private function redirectToIndex($params = [], $flash = null, $flashContents = null)
-    {
-        if ($flash) {
-            $this->addFlash($flash, $flashContents);
-        }
-
-        // Somehow redirect...
     }
 }
