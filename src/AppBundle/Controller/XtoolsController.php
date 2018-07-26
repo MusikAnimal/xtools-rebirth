@@ -233,13 +233,24 @@ abstract class XtoolsController extends Controller
         $pageRepo->setContainer($this->container);
         $page->setRepository($pageRepo);
 
-        if (!$page->exists()) {
-            // Redirect if the page doesn't exist.
-            $this->addFlash('notice', ['no-result', $pageTitle]);
-            return $this->redirectToRoute($this->getIndexRoute());
+        if ($page->exists()) {
+            return $page;
         }
 
-        return $page;
+        $this->addFlash('danger', ['no-result', $this->params['article']]);
+
+        $originalParams = $this->params;
+
+        // Remove invalid parameter.
+        unset($this->params['project']);
+
+        // Throw exception which will redirect back to index page.
+        throw new XtoolsHttpException(
+            'Page not found',
+            $this->generateUrl($this->getIndexRoute(), $this->params),
+            $originalParams,
+            $this->isApi
+        );
     }
 
     /**
