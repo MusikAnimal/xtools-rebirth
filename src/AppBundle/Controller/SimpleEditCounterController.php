@@ -7,11 +7,9 @@ namespace AppBundle\Controller;
 
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
 use Symfony\Component\DependencyInjection\ContainerInterface;
-use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\JsonResponse;
-use Symfony\Component\HttpFoundation\RedirectResponse;
 use Xtools\SimpleEditCounter;
 use Xtools\SimpleEditCounterRepository;
 
@@ -51,10 +49,9 @@ class SimpleEditCounterController extends XtoolsController
      * @Route("/sc/", name="SimpleEditCounterSlash")
      * @Route("/sc/index.php", name="SimpleEditCounterIndexPhp")
      * @Route("/sc/{project}", name="SimpleEditCounterProject")
-     * @param Request $request The HTTP request.
      * @return Response
      */
-    public function indexAction(Request $request)
+    public function indexAction()
     {
         // Redirect if project and username are given.
         if (isset($this->params['project']) && isset($this->params['username'])) {

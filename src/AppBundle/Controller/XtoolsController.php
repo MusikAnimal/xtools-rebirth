@@ -1,7 +1,6 @@
 <?php
 /**
- * This file contains the abstract XtoolsController,
- * which all other controllers will extend.
+ * This file contains the abstract XtoolsController, which all other controllers will extend.
  */
 
 namespace AppBundle\Controller;
@@ -9,6 +8,8 @@ namespace AppBundle\Controller;
 use AppBundle\Exception\XtoolsHttpException;
 use Symfony\Bundle\FrameworkBundle\Controller\Controller;
 use Symfony\Component\DependencyInjection\ContainerInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -20,9 +21,8 @@ use Xtools\PageRepository;
 use Xtools\User;
 
 /**
- * XtoolsController supplies a variety of methods around parsing and validing
- * parameters, and initializing Project/User instances. These are used in
- * other controllers in the AppBundle\Controller namespace.
+ * XtoolsController supplies a variety of methods around parsing and validating parameters, and initializing
+ * Project/User instances. These are used in other controllers in the AppBundle\Controller namespace.
  * @abstract
  */
 abstract class XtoolsController extends Controller
@@ -52,6 +52,17 @@ abstract class XtoolsController extends Controller
 
     /** @var int|false End date parsed from the Request. */
     protected $end = false;
+
+    /** @var int|'all' Namespace parsed from the Request. */
+    protected $namespace;
+
+    /** @var int Pagination offset parsed from the Request. */
+    protected $offset = 0;
+
+    /** @var int Number of results to return. */
+    protected $limit;
+
+    protected $isSubRequest;
 
     protected $tooHighEditCountAction;
 
@@ -97,9 +108,21 @@ abstract class XtoolsController extends Controller
         if (isset($this->params['username'])) {
             $this->user = $this->validateUser($this->params['username']);
         }
-        if (isset($this->params['page'])) {
-            $this->page = $this->validatePage($this->params['page']);
+        if (isset($this->params['namespace'])) {
+            $this->namespace = $this->params['namespace'];
         }
+        if (isset($this->params['page'])) {
+            $this->page = $this->getPageFromNsAndTitle($this->namespace, $this->params['page']);
+        }
+        if (isset($this->params['offset'])) {
+            $this->offset = (int)$this->params['offset'];
+        }
+        if (isset($this->params['limit'])) {
+            $this->limit = (int)$this->params['limit'];
+        }
+
+        $this->isSubRequest = $this->request->get('htmlonly')
+            || $this->get('request_stack')->getParentRequest() !== null;
 
         // Dates.
         $start = isset($this->params['start']) ? $this->params['start'] : false;
@@ -107,6 +130,18 @@ abstract class XtoolsController extends Controller
         if ($start || $end) {
             list($this->start, $this->end) = $this->getUTCFromDateParams($start, $end);
         }
+    }
+
+    private function getPageFromNsAndTitle($ns, $title)
+    {
+        if ($ns == '') {
+            return $this->validatePage($title);
+        }
+
+        // Prepend namespace and strip out duplicates.
+        $nsName = $this->project->getNamespaces()[$ns];
+        $title = $nsName.':'.ltrim($title, $nsName.':');
+        return $this->validatePage($title);
     }
 
     /**
@@ -162,8 +197,7 @@ abstract class XtoolsController extends Controller
     }
 
     /**
-     * Get a Project instance from the project string, using defaults if the
-     * given project string is invalid.
+     * Get a Project instance from the project string, using defaults if the given project string is invalid.
      * @return Project
      */
     public function getProjectFromQuery()
@@ -192,9 +226,8 @@ abstract class XtoolsController extends Controller
     /**
      * Validate the given user, returning a User or Redirect if they don't exist.
      * @param string $username
-     * @param string|null $tooHighEditCountAction If the requested user has more than the configured
-     *   max edit count, they will be redirected to this route, passing in available params.
      * @return RedirectResponse|\Xtools\User
+     * @throws XtoolsHttpException
      */
     public function validateUser($username)
     {
@@ -253,6 +286,7 @@ abstract class XtoolsController extends Controller
      * Get a Page instance from the given page title, and validate that it exists.
      * @param string $pageTitle
      * @return Page|RedirectResponse Page or redirect back to index if page doesn't exist.
+     * @throws XtoolsHttpException
      */
     public function validatePage($pageTitle)
     {
@@ -265,12 +299,14 @@ abstract class XtoolsController extends Controller
             return $page;
         }
 
-        $this->addFlash('danger', ['no-result', $this->params['page']]);
+        if (isset($this->params['page'])) {
+            $this->addFlash('danger', ['no-result', $this->params['page']]);
+        }
 
         $originalParams = $this->params;
 
         // Remove invalid parameter.
-        unset($this->params['project']);
+        unset($this->params['page']);
 
         // Throw exception which will redirect back to index page.
         throw new XtoolsHttpException(
@@ -318,6 +354,7 @@ abstract class XtoolsController extends Controller
             'start',
             'end',
             'offset',
+            'limit',
             'format',
 
             // Legacy parameters.
@@ -487,6 +524,25 @@ abstract class XtoolsController extends Controller
 
         $contentType = isset($formatMap[$format]) ? $formatMap[$format] : 'text/html';
         $response->headers->set('Content-Type', $contentType);
+
+        return $response;
+    }
+
+    /**
+     * Return a JsonResponse object pre-supplied with the requested params.
+     * @param $data
+     * @return JsonResponse
+     */
+    public function getFormattedApiResponse($data)
+    {
+        $response = new JsonResponse();
+        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
+        $response->setStatusCode(Response::HTTP_OK);
+
+        $response->setData(array_merge($this->params, [
+            // In some controllers, $this->params['project'] may be overriden with a Project object.
+            'project' => $this->project->getDomain(),
+        ], $data));
 
         return $response;
     }

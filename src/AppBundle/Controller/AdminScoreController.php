@@ -8,15 +8,13 @@ namespace AppBundle\Controller;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpFoundation\RedirectResponse;
 use DateTime;
 
 /**
- * The AdminScoreController serves the search form and results page of the AdminScore tool
+ * The AdminScoreController serves the search form and results page of the AdminScore tool.
  */
 class AdminScoreController extends XtoolsController
 {
-
     /**
      * Get the name of the tool's index route.
      * @return string
@@ -39,44 +37,30 @@ class AdminScoreController extends XtoolsController
      */
     public function indexAction(Request $request)
     {
-        $params = $this->parseQueryParams($request);
-
         // Redirect if we have a project and user.
-        if (isset($params['project']) && isset($params['username'])) {
-            return $this->redirectToRoute('AdminScoreResult', $params);
+        if (isset($this->params['project']) && isset($this->params['username'])) {
+            return $this->redirectToRoute('AdminScoreResult', $this->params);
         }
-
-        // Convert the given project (or default project) into a Project instance.
-        $params['project'] = $this->getProjectFromQuery($params);
 
         return $this->render('adminscore/index.html.twig', [
             'xtPage' => 'adminscore',
             'xtPageTitle' => 'tool-adminscore',
             'xtSubtitle' => 'tool-adminscore-desc',
-            'project' => $params['project'],
+            'project' => $this->params['project'],
         ]);
     }
 
     /**
      * Display the AdminScore results.
      * @Route("/adminscore/{project}/{username}", name="AdminScoreResult")
-     * @param Request $request The HTTP request.
      * @return Response
      * @todo Move SQL to a model.
      * @codeCoverageIgnore
      */
-    public function resultAction(Request $request)
+    public function resultAction()
     {
-        // Second parameter causes it return a Redirect to the index if the user has too many edits.
-        $ret = $this->validateProjectAndUser($request, 'adminscore');
-        if ($ret instanceof RedirectResponse) {
-            return $ret;
-        } else {
-            list($projectData, $user) = $ret;
-        }
-
-        $dbName = $projectData->getDatabaseName();
-        $projectRepo = $projectData->getRepository();
+        $dbName = $this->project->getDatabaseName();
+        $projectRepo = $this->project->getRepository();
 
         $userTable = $projectRepo->getTableName($dbName, 'user');
         $pageTable = $projectRepo->getTableName($dbName, 'page');
@@ -103,7 +87,7 @@ class AdminScoreController extends XtoolsController
         ];
 
         // Grab the connection to the replica database (which is separate from the above)
-        $conn = $this->get('doctrine')->getManager("replicas")->getConnection();
+        $conn = $this->get('doctrine')->getManager('replicas')->getConnection();
 
         // Prepare the query and execute
         $resultQuery = $conn->prepare("
@@ -159,7 +143,7 @@ class AdminScoreController extends XtoolsController
                 AND r.rev_user_text = :username;
         ");
 
-        $username = $user->getUsername();
+        $username = $this->user->getUsername();
         $resultQuery->bindParam("username", $username);
         $resultQuery->execute();
 
@@ -205,8 +189,8 @@ class AdminScoreController extends XtoolsController
         return $this->render('adminscore/result.html.twig', [
             'xtPage' => 'adminscore',
             'xtTitle' => $username,
-            'project' => $projectData,
-            'user' => $user,
+            'project' => $this->project,
+            'user' => $this->user,
             'master' => $master,
             'total' => $total,
         ]);

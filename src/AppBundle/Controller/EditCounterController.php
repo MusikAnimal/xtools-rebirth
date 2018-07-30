@@ -41,7 +41,10 @@ class EditCounterController extends XtoolsController
      */
     public function __construct(RequestStack $requestStack, ContainerInterface $container)
     {
+        // Causes the tool to redirect to the Simple Edit Counter if the user has too high of an edit count.
         $this->tooHighEditCountAction = 'SimpleEditCounterResult';
+
+        // The rightsChanges action is exempt from the edit count limitation.
         $this->tooHighEditCountActionBlacklist = ['rightsChanges'];
 
         parent::__construct($requestStack, $container);
@@ -142,11 +145,10 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->get('request_stack')->getParentRequest() !== null;
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -166,11 +168,10 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->get('request_stack')->getParentRequest() !== null;
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -190,7 +191,6 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->get('request_stack')->getParentRequest() !== null;
         $optedInPage = $this->project
             ->getRepository()
             ->getPage($this->project, $this->project->userOptInPage($this->user));
@@ -198,7 +198,7 @@ class EditCounterController extends XtoolsController
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -219,11 +219,10 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->container->get('request_stack')->getParentRequest() !== null;
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -243,14 +242,13 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->container->get('request_stack')->getParentRequest() !== null;
         $optedInPage = $this->project
             ->getRepository()
             ->getPage($this->project, $this->project->userOptInPage($this->user));
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -269,13 +267,12 @@ class EditCounterController extends XtoolsController
      */
     public function rightsChangesAction()
     {
-        $this->setUpEditCounter(null, false);
+        $this->setUpEditCounter();
 
-        $isSubRequest = $this->container->get('request_stack')->getParentRequest() !== null;
         $ret = [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,
@@ -310,13 +307,10 @@ class EditCounterController extends XtoolsController
     {
         $this->setUpEditCounter();
 
-        $isSubRequest = $this->request->get('htmlonly')
-                        || $this->container->get('request_stack')->getParentRequest() !== null;
-
         return $this->render('editCounter/latest_global.html.twig', [
             'xtTitle' => $this->user->getUsername(),
             'xtPage' => 'editcounter',
-            'is_sub_request' => $isSubRequest,
+            'is_sub_request' => $this->isSubRequest,
             'user' => $this->user,
             'project' => $this->project,
             'ec' => $this->editCounter,

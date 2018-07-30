@@ -24,6 +24,7 @@
     },
     "require": {
         "php": "^5.6|^7.0",
+        "ext-json": "*",
         "symfony/symfony": "^3.0",
         "twig/twig": "^1.0",
         "doctrine/orm": "^2.5",

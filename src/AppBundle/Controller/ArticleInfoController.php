@@ -5,6 +5,7 @@
 
 namespace AppBundle\Controller;
 
+use AppBundle\Exception\XtoolsHttpException;
 use DateTime;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -47,12 +48,17 @@ class ArticleInfoController extends XtoolsController
             return $this->redirectToRoute('ArticleInfoResult', $this->params);
         }
 
-        return $this->render('articleInfo/index.html.twig', [
+        return $this->render('articleInfo/index.html.twig', array_merge([
             'xtPage' => 'articleinfo',
             'xtPageTitle' => 'tool-articleinfo',
             'xtSubtitle' => 'tool-articleinfo-desc',
             'project' => $this->project,
-        ]);
+
+            // Defaults that will get overridden if in $params.
+            'start' => '',
+            'end' => '',
+            'page' => '',
+        ], $this->params, ['project' => $this->project]));
     }
 
     /**
@@ -250,15 +256,7 @@ class ArticleInfoController extends XtoolsController
             return $this->getApiHtmlResponse($this->project, $this->page, $data);
         }
 
-        $body = array_merge([
-            'project' => $this->project->getDomain(),
-            'page' => $this->page->getTitle(),
-        ], $data);
-
-        return new JsonResponse(
-            $body,
-            Response::HTTP_OK
-        );
+        return $this->getFormattedApiResponse($data);
     }
 
     /**
@@ -333,9 +331,9 @@ class ArticleInfoController extends XtoolsController
     private function getApiHtmlResponse(Project $project, Page $page, $data)
     {
         $response = $this->render('articleInfo/api.html.twig', [
-            'data' => $data,
             'project' => $project,
             'page' => $page,
+            'data' => $data,
         ]);
 
         // All /api routes by default respond with a JSON content type.
@@ -355,7 +353,7 @@ class ArticleInfoController extends XtoolsController
      *     name="PageApiProse",
      *     requirements={"page"=".+"}
      * )
-     * @return JsonResponse|RedirectResponse
+     * @return JsonResponse
      * @codeCoverageIgnore
      */
     public function proseStatsApiAction()
@@ -367,26 +365,15 @@ class ArticleInfoController extends XtoolsController
         $articleInfo = new ArticleInfo($this->page, $this->container);
         $articleInfo->setRepository($articleInfoRepo);
 
-        $ret = array_merge(
-            [
-                'project' => $this->project->getDomain(),
-                'page' => $this->page->getTitle(),
-            ],
-            $articleInfo->getProseStats()
-        );
-
-        return new JsonResponse(
-            $ret,
-            Response::HTTP_OK
-        );
+        return $this->getFormattedApiResponse($articleInfo->getProseStats());
     }
 
     /**
-     * Get the page assessments of a page, along with various related metadata.
+     * Get the page assessments of one or more pages, along with various related metadata.
      * @Route(
      *     "/api/page/assessments/{project}/{pages}",
      *     name="PageApiAssessments",
-     *     requirements={"page"=".+"}
+     *     requirements={"pages"=".+"}
      * )
      * @param string $pages May be multiple pages separated by pipes, e.g. Foo|Bar|Baz
      * @return JsonResponse
@@ -397,15 +384,11 @@ class ArticleInfoController extends XtoolsController
         $this->recordApiUsage('page/assessments');
 
         $pages = explode('|', $pages);
-        $out = [
-            'project' => $this->project->getDomain(),
-        ];
+        $out = [];
 
-        foreach ($pages as $page) {
-            $page = $this->validatePage($page);
-            if ($page instanceof RedirectResponse) {
-                $out[$page->getTitle()] = false;
-            } else {
+        foreach ($pages as $pageTitle) {
+            try {
+                $page = $this->validatePage($pageTitle);
                 $assessments = $page->getProject()
                     ->getPageAssessments()
                     ->getAssessments($page);
@@ -413,13 +396,12 @@ class ArticleInfoController extends XtoolsController
                 $out[$page->getTitle()] = $this->request->get('classonly')
                     ? $assessments['assessment']
                     : $assessments;
+            } catch (XtoolsHttpException $e) {
+                $out[$pageTitle] = false;
             }
         }
 
-        return new JsonResponse(
-            $out,
-            Response::HTTP_OK
-        );
+        return $this->getFormattedApiResponse($out);
     }
 
     /**
@@ -436,18 +418,7 @@ class ArticleInfoController extends XtoolsController
     {
         $this->recordApiUsage('page/links');
 
-        $out = [
-            'project' => $this->project->getDomain(),
-            'page' => $this->page->getTitle(),
-        ];
-
-        $response = new JsonResponse(
-            array_merge($out, $this->page->countLinksAndRedirects()),
-            Response::HTTP_OK
-        );
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        return $response;
+        return $this->getFormattedApiResponse($this->page->countLinksAndRedirects());
     }
 
     /**
@@ -463,13 +434,13 @@ class ArticleInfoController extends XtoolsController
      *     defaults={
      *         "start"=false,
      *         "end"=false,
+     *         "limit"=20,
      *     }
      * )
-     * @param int $limit
      * @return JsonResponse
      * @codeCoverageIgnore
      */
-    public function topEditorsApiAction($limit = 20)
+    public function topEditorsApiAction()
     {
         $this->recordApiUsage('page/top_editors');
 
@@ -479,27 +450,12 @@ class ArticleInfoController extends XtoolsController
         $articleInfo->setRepository($articleInfoRepo);
 
         $topEditors = $articleInfo->getTopEditorsByEditCount(
-            $limit,
+            $this->limit,
             $this->request->query->get('nobots') != ''
         );
 
-        $ret = [
-            'project' => $this->project->getDomain(),
-            'page' => $this->page->getTitle(),
-        ];
-
-        if ($this->start !== false) {
-            $ret['start'] = date('Y-m-d', $this->start);
-        }
-        if ($this->end !== false) {
-            $ret['end'] = date('Y-m-d', $this->end);
-        }
-
-        $ret['top_editors'] = $topEditors;
-
-        $response = new JsonResponse($ret, Response::HTTP_OK);
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        return $response;
+        return $this->getFormattedApiResponse([
+            'top_editors' => $topEditors,
+        ]);
     }
 }
