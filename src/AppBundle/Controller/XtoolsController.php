@@ -11,7 +11,6 @@ use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Xtools\ProjectRepository;
 use Xtools\UserRepository;
@@ -62,10 +61,18 @@ abstract class XtoolsController extends Controller
     /** @var int Number of results to return. */
     protected $limit;
 
+    /** @var bool Is the current request a subrequest? */
     protected $isSubRequest;
 
+    /**
+     * @var string This activates the 'too high edit count' functionality. This property represents the
+     *   action that should be redirected to if the user has too high of an edit count.
+     */
     protected $tooHighEditCountAction;
 
+    /**
+     * @var array Actions that are exempt from edit count limitations.
+     */
     protected $tooHighEditCountActionBlacklist = [];
 
     /**
@@ -84,7 +91,7 @@ abstract class XtoolsController extends Controller
     {
         $this->request = $requestStack->getCurrentRequest();
         $this->container = $container;
-        $this->params = $this->parseQueryParams($this->request);
+        $this->params = $this->parseQueryParams();
 
         $pattern = "#::([a-zA-Z]*)Action#";
         $matches = [];
@@ -100,6 +107,9 @@ abstract class XtoolsController extends Controller
         }
     }
 
+    /**
+     * Normalize all common parameters used by the controllers and set class properties.
+     */
     private function setProperties()
     {
         if (isset($this->params['project'])) {
@@ -132,22 +142,29 @@ abstract class XtoolsController extends Controller
         }
     }
 
-    private function getPageFromNsAndTitle($ns, $title)
+    /**
+     * Construct a fully qualified page title given the namespace and title.
+     * @param int $ns Namespace ID.
+     * @param string $title Page title.
+     * @param bool $rawTitle Return only the title (and not a Page).
+     * @return Page|string
+     */
+    protected function getPageFromNsAndTitle($ns, $title, $rawTitle = false)
     {
-        if ($ns == '') {
-            return $this->validatePage($title);
+        if ((int)$ns === 0) {
+            return $rawTitle ? $title : $this->validatePage($title);
         }
 
         // Prepend namespace and strip out duplicates.
         $nsName = $this->project->getNamespaces()[$ns];
         $title = $nsName.':'.ltrim($title, $nsName.':');
-        return $this->validatePage($title);
+        return $rawTitle ? $title : $this->validatePage($title);
     }
 
     /**
      * Validate the given project, returning a Project if it is valid or false otherwise.
      * @param string $projectQuery Project domain or database name.
-     * @return Project|RedirectResponse|false
+     * @return Project
      * @throws XtoolsHttpException
      */
     public function validateProject($projectQuery)
@@ -159,19 +176,11 @@ abstract class XtoolsController extends Controller
             return $project;
         }
 
-        $this->addFlash('danger', ['invalid-project', $this->params['project']]);
-
-        $originalParams = $this->params;
-
-        // Remove invalid parameter.
-        unset($this->params['project']);
-
-        // Throw exception which will redirect back to index page.
-        throw new XtoolsHttpException(
+        $this->throwXtoolsException(
+            $this->getIndexRoute(),
             'Invalid project',
-            $this->generateUrl($this->getIndexRoute(), $this->params),
-            $originalParams,
-            $this->isApi
+            ['invalid-project', $this->params['project']],
+            'project'
         );
     }
 
@@ -226,7 +235,7 @@ abstract class XtoolsController extends Controller
     /**
      * Validate the given user, returning a User or Redirect if they don't exist.
      * @param string $username
-     * @return RedirectResponse|\Xtools\User
+     * @return User
      * @throws XtoolsHttpException
      */
     public function validateUser($username)
@@ -243,14 +252,7 @@ abstract class XtoolsController extends Controller
 
         // Don't continue if the user doesn't exist.
         if (!$user->existsOnProject($this->project)) {
-            $this->addFlash('danger', 'user-not-found');
-            unset($this->params['username']);
-            throw new XtoolsHttpException(
-                'User not found',
-                $this->generateUrl($this->getIndexRoute(), $this->params),
-                $originalParams,
-                $this->isApi
-            );
+            $this->throwXtoolsException($this->getIndexRoute(), 'User not found', 'user-not-found', 'username');
         }
 
         // Reject users with a crazy high edit count.
@@ -258,6 +260,8 @@ abstract class XtoolsController extends Controller
             !in_array($this->controllerAction, $this->tooHighEditCountActionBlacklist) &&
             $user->hasTooManyEdits($this->project)
         ) {
+            /** TODO: Somehow get this to use self::throwXtoolsException */
+
             // FIXME: i18n!!
             $this->addFlash('danger', ['too-many-edits', number_format($user->maxEdits())]);
 
@@ -285,7 +289,7 @@ abstract class XtoolsController extends Controller
     /**
      * Get a Page instance from the given page title, and validate that it exists.
      * @param string $pageTitle
-     * @return Page|RedirectResponse Page or redirect back to index if page doesn't exist.
+     * @return Page
      * @throws XtoolsHttpException
      */
     public function validatePage($pageTitle)
@@ -295,23 +299,50 @@ abstract class XtoolsController extends Controller
         $pageRepo->setContainer($this->container);
         $page->setRepository($pageRepo);
 
-        if ($page->exists()) {
+        if ($page->exists()) { // Page is valid.
             return $page;
         }
 
-        if (isset($this->params['page'])) {
-            $this->addFlash('danger', ['no-result', $this->params['page']]);
-        }
+        $this->throwXtoolsException(
+            $this->getIndexRoute(),
+            'Page not found',
+            isset($this->params['page']) ? ['no-result', $this->params['page']] : null,
+            'page'
+        );
+    }
 
+    /**
+     * Throw an XtoolsHttpException, which the given error message and redirects to specified action.
+     * @param string $redirectAction Name of action to redirect to.
+     * @param string $message Shown in API responses (TODO: this should be i18n'd too?)
+     * @param array|string|null $flashParams
+     * @param string $invalidParam This will be removed from $this->params. Omit if you don't want this to happen.
+     * @throws XtoolsHttpException
+     */
+    public function throwXtoolsException($redirectAction, $message, $flashParams = null, $invalidParam = null)
+    {
+        if (null !== $flashParams) {
+            $this->addFlash('danger', $flashParams);
+        }
         $originalParams = $this->params;
 
-        // Remove invalid parameter.
-        unset($this->params['page']);
+        // Remove invalid parameter if it was given.
+        if (is_string($invalidParam)) {
+            unset($this->params[$invalidParam]);
+        }
 
-        // Throw exception which will redirect back to index page.
+        // We sometimes are redirecting to the index page, so also remove project (otherwise we'd get a redirect loop).
+        /**
+         * FIXME: Index pages should have a 'nosubmit' parameter to prevent submission.
+         * Then we don't even need to remove $invalidParam.
+         * Better, we should show the error on the results page, with no results.
+         */
+        unset($this->params['project']);
+
+        // Throw exception which will redirect to $redirectAction.
         throw new XtoolsHttpException(
-            'Page not found',
-            $this->generateUrl($this->getIndexRoute(), $this->params),
+            $message,
+            $this->generateUrl($redirectAction, $this->params),
             $originalParams,
             $this->isApi
         );

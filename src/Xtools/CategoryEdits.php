@@ -62,8 +62,8 @@ class CategoryEdits extends Model
         $this->categories = array_map(function ($category) {
             return str_replace(' ', '_', $category);
         }, $categories);
-        $this->start = date('Y-m-d', $start);
-        $this->end = date('Y-m-d', $end);
+        $this->start = false === $start ? '' : date('Y-m-d', $start);
+        $this->end = false === $end ? '' : date('Y-m-d', $end);
         $this->offset = (int)$offset;
     }
 

@@ -71,9 +71,10 @@ class PagesController extends XtoolsController
             'xtPage' => 'pages',
 
             // Defaults that will get overridden if in $params.
+            'username' => '',
             'namespace' => 0,
             'redirects' => 'noredirects',
-            'deleted' => 'all'
+            'deleted' => 'all',
         ], $this->params, ['project' => $this->project]));
     }
 

@@ -5,6 +5,7 @@
 
 namespace AppBundle\Controller;
 
+use AppBundle\Exception\XtoolsHttpException;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -74,10 +75,11 @@ class AutomatedEditsController extends XtoolsController
             'xtPage' => 'autoedits',
 
             // Defaults that will get overridden if in $this->params.
+            'username' => '',
             'namespace' => 0,
             'start' => '',
             'end' => '',
-        ], $this->params));
+        ], $this->params, ['project' => $this->project]));
     }
 
     /**
@@ -86,16 +88,23 @@ class AutomatedEditsController extends XtoolsController
      */
     private function setupAutoEdits()
     {
-        // Format dates as needed by User model, if the date is present.
-        if ($this->start !== false) {
-            $this->start = date('Y-m-d', $this->start);
-        }
-        if ($this->end !== false) {
-            $this->end = date('Y-m-d', $this->end);
-        }
-
-        // Check query param for the tool name.
         $tool = $this->request->query->get('tool', null);
+
+        $autoEditsRepo = new AutoEditsRepository();
+        $autoEditsRepo->setContainer($this->container);
+
+        // Validate tool.
+        // FIXME: instead of redirecting to index page, show result page listing all tools for that project,
+        //  clickable to show edits by the user, etc.
+        if (!isset($autoEditsRepo->getTools($this->project)[$tool])) {
+            $docUrl = $this->generateUrl('ProjectApiAutoEditsTools', ['project' => $this->params['project']]);
+            $this->throwXtoolsException(
+                $this->getIndexRoute(),
+                "No known tool with name '$tool'. For available tools, use $docUrl",
+                ['no-result', $tool],
+                'tool'
+            );
+        }
 
         $this->autoEdits = new AutoEdits(
             $this->project,
@@ -106,8 +115,6 @@ class AutomatedEditsController extends XtoolsController
             $tool,
             $this->offset
         );
-        $autoEditsRepo = new AutoEditsRepository();
-        $autoEditsRepo->setContainer($this->container);
         $this->autoEdits->setRepository($autoEditsRepo);
 
         $this->output = [
@@ -125,14 +132,13 @@ class AutomatedEditsController extends XtoolsController
      * @Route(
      *     "/autoedits/{project}/{username}/{namespace}/{start}/{end}", name="AutoEditsResult",
      *     requirements={
-     *         "namespace" = "|all|\d+",
-     *         "start" = "|\d{4}-\d{2}-\d{2}",
-     *         "end" = "|\d{4}-\d{2}-\d{2}",
-     *         "namespace" = "|all|\d+"
+     *         "namespace"="|all|\d+",
+     *         "start"="|\d{4}-\d{2}-\d{2}",
+     *         "end"="|\d{4}-\d{2}-\d{2}",
      *     },
-     *     defaults={"namespace" = 0, "start" = "", "end" = ""}
+     *     defaults={"namespace"=0, "start"=false, "end"=false}
      * )
-     * @return RedirectResponse|Response
+     * @return Response
      * @codeCoverageIgnore
      */
     public function resultAction()
@@ -150,12 +156,12 @@ class AutomatedEditsController extends XtoolsController
      *   "/nonautoedits-contributions/{project}/{username}/{namespace}/{start}/{end}/{offset}",
      *   name="NonAutoEditsContributionsResult",
      *   requirements={
-     *       "namespace" = "|all|\d+",
-     *       "start" = "|\d{4}-\d{2}-\d{2}",
-     *       "end" = "|\d{4}-\d{2}-\d{2}",
-     *       "offset" = "\d*"
+     *       "namespace"="|all|\d+",
+     *       "start"="|\d{4}-\d{2}-\d{2}",
+     *       "end"="|\d{4}-\d{2}-\d{2}",
+     *       "offset"="\d*"
      *   },
-     *   defaults={"namespace" = 0, "start" = "", "end" = "", "offset" = 0}
+     *   defaults={"namespace"=0, "start"=false, "end"=false, "offset"=0}
      * )
      * @return Response|RedirectResponse
      * @codeCoverageIgnore
@@ -173,12 +179,12 @@ class AutomatedEditsController extends XtoolsController
      *   "/autoedits-contributions/{project}/{username}/{namespace}/{start}/{end}/{offset}",
      *   name="AutoEditsContributionsResult",
      *   requirements={
-     *       "namespace" = "|all|\d+",
-     *       "start" = "|\d{4}-\d{2}-\d{2}",
-     *       "end" = "|\d{4}-\d{2}-\d{2}",
-     *       "offset" = "\d*"
+     *       "namespace"="|all|\d+",
+     *       "start"="|\d{4}-\d{2}-\d{2}",
+     *       "end"="|\d{4}-\d{2}-\d{2}",
+     *       "offset"="\d*"
      *   },
-     *   defaults={"namespace" = 0, "start" = "", "end" = "", "offset" = 0}
+     *   defaults={"namespace"=0, "start"=false, "end"=false, "offset"=0}
      * )
      * @return Response|RedirectResponse
      * @codeCoverageIgnore
@@ -195,6 +201,7 @@ class AutomatedEditsController extends XtoolsController
     /**
      * Get a list of the automated tools and their regex/tags/etc.
      * @Route("/api/user/automated_tools/{project}", name="UserApiAutoEditsTools")
+     * @Route("/api/project/automated_tools/{project}", name="ProjectApiAutoEditsTools")
      * @return JsonResponse
      * @codeCoverageIgnore
      */
@@ -212,11 +219,11 @@ class AutomatedEditsController extends XtoolsController
      *   "/api/user/automated_editcount/{project}/{username}/{namespace}/{start}/{end}/{tools}",
      *   name="UserApiAutoEditsCount",
      *   requirements={
-     *       "namespace" = "|all|\d+",
-     *       "start" = "|\d{4}-\d{2}-\d{2}",
-     *       "end" = "|\d{4}-\d{2}-\d{2}"
+     *       "namespace"="|all|\d+",
+     *       "start"="|\d{4}-\d{2}-\d{2}",
+     *       "end"="|\d{4}-\d{2}-\d{2}"
      *   },
-     *   defaults={"namespace" = "all", "start" = "", "end" = ""}
+     *   defaults={"namespace"="all", "start"=false, "end"=false}
      * )
      * @param string $tools Non-blank to show which tools were used and how many times.
      * @return JsonResponse
@@ -228,22 +235,18 @@ class AutomatedEditsController extends XtoolsController
 
         $this->setupAutoEdits();
 
-        $res = $this->getJsonData();
-        $res['total_editcount'] = $this->autoEdits->getEditCount();
-
-        $response = new JsonResponse();
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        $res['automated_editcount'] = $this->autoEdits->getAutomatedCount();
-        $res['nonautomated_editcount'] = $res['total_editcount'] - $res['automated_editcount'];
+        $ret = [
+            'total_editcount' => $this->autoEdits->getEditCount(),
+            'automated_editcount' => $this->autoEdits->getAutomatedCount(),
+        ];
+        $ret['nonautomated_editcount'] = $ret['total_editcount'] - $ret['automated_editcount'];
 
         if ($tools != '') {
             $tools = $this->autoEdits->getToolCounts();
-            $res['automated_tools'] = $tools;
+            $ret['automated_tools'] = $tools;
         }
 
-        $response->setData($res);
-        return $response;
+        return $this->getFormattedApiResponse($ret);
     }
 
     /**
@@ -252,12 +255,12 @@ class AutomatedEditsController extends XtoolsController
      *   "/api/user/nonautomated_edits/{project}/{username}/{namespace}/{start}/{end}/{offset}",
      *   name="UserApiNonAutoEdits",
      *   requirements={
-     *       "namespace" = "|all|\d+",
-     *       "start" = "|\d{4}-\d{2}-\d{2}",
-     *       "end" = "|\d{4}-\d{2}-\d{2}",
-     *       "offset" = "\d*"
+     *       "namespace"="|all|\d+",
+     *       "start"="|\d{4}-\d{2}-\d{2}",
+     *       "end"="|\d{4}-\d{2}-\d{2}",
+     *       "offset"="\d*"
      *   },
-     *   defaults={"namespace" = 0, "start" = "", "end" = "", "offset" = 0}
+     *   defaults={"namespace"=0, "start"=false, "end"=false, "offset"=0}
      * )
      * @return JsonResponse
      * @codeCoverageIgnore
@@ -268,41 +271,27 @@ class AutomatedEditsController extends XtoolsController
 
         $this->setupAutoEdits();
 
-        $ret = $this->getJsonData();
-        $ret['nonautomated_edits'] = $this->autoEdits->getNonAutomatedEdits(true);
+        $ret = array_map(function ($rev) {
+            return array_merge([
+                'full_page_title' => $this->getPageFromNsAndTitle($rev['page_namespace'], $rev['page_title'], true),
+            ], $rev);
+        }, $this->autoEdits->getNonAutomatedEdits(true));
 
-        $namespaces = $this->project->getNamespaces();
-
-        $ret['nonautomated_edits'] = array_map(function ($rev) use ($namespaces) {
-            $pageTitle = $rev['page_title'];
-            if ((int)$rev['page_namespace'] === 0) {
-                $fullPageTitle = $pageTitle;
-            } else {
-                $fullPageTitle = $namespaces[$rev['page_namespace']].":$pageTitle";
-            }
-
-            return array_merge(['full_page_title' => $fullPageTitle], $rev);
-        }, $ret['nonautomated_edits']);
-
-        $response = new JsonResponse();
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        $response->setData($ret);
-        return $response;
+        return $this->getFormattedApiResponse(['nonautomated_edits' => $ret]);
     }
 
     /**
      * Get (semi-)automated edits for the given user, optionally using the given tool.
      * @Route(
      *   "/api/user/automated_edits/{project}/{username}/{namespace}/{start}/{end}/{offset}",
-     *   name="UserNonAutoEdits",
+     *   name="UserApiAutoEdits",
      *   requirements={
-     *       "namespace" = "|all|\d+",
-     *       "start" = "|\d{4}-\d{2}-\d{2}",
-     *       "end" = "|\d{4}-\d{2}-\d{2}",
-     *       "offset" = "\d*"
+     *       "namespace"="|all|\d+",
+     *       "start"="|\d{4}-\d{2}-\d{2}",
+     *       "end"="|\d{4}-\d{2}-\d{2}",
+     *       "offset"="\d*"
      *   },
-     *   defaults={"namespace" = 0, "start" = "", "end" = "", "offset" = 0}
+     *   defaults={"namespace"=0, "start"=false, "end"=false, "offset"=0}
      * )
      * @return Response
      * @codeCoverageIgnore
@@ -313,47 +302,18 @@ class AutomatedEditsController extends XtoolsController
 
         $this->setupAutoEdits();
 
-        $ret = $this->getJsonData();
-        $ret['nonautomated_edits'] = $this->autoEdits->getAutomatedEdits(true);
+        $ret = [];
 
-        $namespaces = $this->project->getNamespaces();
-
-        $ret['nonautomated_edits'] = array_map(function ($rev) use ($namespaces) {
-            $pageTitle = $rev['page_title'];
-            if ((int)$rev['page_namespace'] === 0) {
-                $fullPageTitle = $pageTitle;
-            } else {
-                $fullPageTitle = $namespaces[$rev['page_namespace']].":$pageTitle";
-            }
-
-            return array_merge(['full_page_title' => $fullPageTitle], $rev);
-        }, $ret['nonautomated_edits']);
-
-        $response = new JsonResponse();
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        $response->setData($ret);
-        return $response;
-    }
-
-    /**
-     * Get data that will be used in API responses.
-     * @return array
-     * @codeCoverageIgnore
-     */
-    private function getJsonData()
-    {
-        $ret = [
-            'project' => $this->project->getDomain(),
-            'username' => $this->user->getUsername(),
-        ];
-
-        foreach (['namespace', 'start', 'end', 'offset'] as $param) {
-            if (isset($this->{$param}) && $this->{$param} != '') {
-                $ret[$param] = $this->{$param};
-            }
+        if ($this->autoEdits->getTool()) {
+            $ret['tool'] = $this->autoEdits->getTool();
         }
 
-        return $ret;
+        $ret['automated_edits'] = array_map(function ($rev) {
+            return array_merge([
+                'full_page_title' => $this->getPageFromNsAndTitle($rev['page_namespace'], $rev['page_title'], true),
+            ], $rev);
+        }, $this->autoEdits->getAutomatedEdits(true));
+
+        return $this->getFormattedApiResponse($ret);
     }
 }
