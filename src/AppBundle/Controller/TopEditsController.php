@@ -170,12 +170,12 @@ class TopEditsController extends XtoolsController
     /**
      * Get the all edits of a user to a specific page, maximum 1000.
      * @Route("/api/user/topedits/{project}/{username}/{namespace}/{page}", name="UserApiTopEditsArticle",
-     *     requirements = {"page" = "|.+", "namespace" = "|\d+|all"},
-     *     defaults = {"page" = "", "namespace" = "all"}
+     *     requirements = {"page"="|.+", "namespace"="|\d+|all"},
+     *     defaults={"page"="", "namespace"="all"}
      * )
      * @Route("/api/user/top_edits/{project}/{username}/{namespace}/{page}", name="UserApiTopEditsArticleUnderscored",
-     *     requirements = {"page" = "|.+", "namespace" = "|\d+|all"},
-     *     defaults = {"page" = "", "namespace" = "all"}
+     *     requirements={"page"="|.+", "namespace"="|\d+|all"},
+     *     defaults={"page"="", "namespace"="all"}
      * )
      * @return JsonResponse
      * @codeCoverageIgnore

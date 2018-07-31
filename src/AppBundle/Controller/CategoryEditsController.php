@@ -56,8 +56,7 @@ class CategoryEditsController extends XtoolsController
      * Display the search form.
      * @Route("/categoryedits", name="CategoryEdits")
      * @Route("/categoryedits/", name="CategoryEditsSlash")
-     * @Route("/catedits", name="CategoryEditsShort")
-     * @Route("/catedits/", name="CategoryEditsShortSlash")
+     * @Route("/categoryedits/{project}", name="CategoryEditsProject")
      * @return Response
      * @codeCoverageIgnore
      */
@@ -77,7 +76,8 @@ class CategoryEditsController extends XtoolsController
             'namespace' => 0,
             'start' => '',
             'end' => '',
-        ], $this->params));
+            'username' => '',
+        ], $this->params, ['project' => $this->project]));
     }
 
     /**
@@ -140,6 +140,8 @@ class CategoryEditsController extends XtoolsController
                 ['categories' => implode('|', $this->categories)]
             ));
         }
+
+        return null;
     }
 
     /**
@@ -148,13 +150,13 @@ class CategoryEditsController extends XtoolsController
      *     "/categoryedits/{project}/{username}/{categories}/{start}/{end}",
      *     name="CategoryEditsResult",
      *     requirements={
-     *         "categories" = "(.+?)(?!\/(?:|\d{4}-\d{2}-\d{2})(?:\/(|\d{4}-\d{2}-\d{2}))?)?$",
-     *         "start" = "|\d{4}-\d{2}-\d{2}",
-     *         "end" = "|\d{4}-\d{2}-\d{2}"
+     *         "categories"="(.+?)(?!\/(?:|\d{4}-\d{2}-\d{2})(?:\/(|\d{4}-\d{2}-\d{2}))?)?$",
+     *         "start"="|\d{4}-\d{2}-\d{2}",
+     *         "end"="|\d{4}-\d{2}-\d{2}"
      *     },
      *     defaults={"start" = false, "end" = false}
      * )
-     * @return RedirectResponse|Response
+     * @return Response
      * @codeCoverageIgnore
      */
     public function resultAction()
@@ -178,7 +180,7 @@ class CategoryEditsController extends XtoolsController
      *   },
      *   defaults={"start" = false, "end" = false, "offset" = 0}
      * )
-     * @return Response|RedirectResponse
+     * @return Response
      * @codeCoverageIgnore
      */
     public function categoryContributionsAction()
@@ -202,7 +204,7 @@ class CategoryEditsController extends XtoolsController
      *   },
      *   defaults={"start" = false, "end" = false}
      * )
-     * @return Response
+     * @return JsonResponse
      * @codeCoverageIgnore
      */
     public function categoryEditCountApiAction()
@@ -211,35 +213,11 @@ class CategoryEditsController extends XtoolsController
 
         $this->setupCategoryEdits();
 
-        $res = $this->getJsonData();
-        $res['total_editcount'] = $this->categoryEdits->getEditCount();
-        $res['category_editcount'] = $this->categoryEdits->getCategoryEditCount();
-
-        $response = new JsonResponse();
-        $response->setEncodingOptions(JSON_NUMERIC_CHECK);
-
-        $response->setData($res);
-        return $response;
-    }
-
-    /**
-     * Get data that will be used in API responses.
-     * @return array
-     * @codeCoverageIgnore
-     */
-    private function getJsonData()
-    {
         $ret = [
-            'project' => $this->project->getDomain(),
-            'username' => $this->user->getUsername(),
+            'total_editcount' => $this->categoryEdits->getEditCount(),
+            'category_editcount' => $this->categoryEdits->getCategoryEditCount(),
         ];
 
-        foreach (['categories', 'start', 'end', 'offset'] as $param) {
-            if (isset($this->{$param}) && $this->{$param} != '') {
-                $ret[$param] = $this->{$param};
-            }
-        }
-
-        return $ret;
+        return $this->getFormattedApiResponse($ret);
     }
 }

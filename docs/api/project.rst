@@ -122,7 +122,7 @@ Get administrative users of the French Wikipedia:
 Admin statistics
 ================
 
-``GET /api/project/adminstats/{project}/{days}``
+``GET /api/project/admin_stats/{project}/{days}``
 
 Get users of the project that are capable of making 'admin actions', along with
 various stats about the actions they took. Time period is limited to one month.
@@ -137,5 +137,5 @@ various stats about the actions they took. Time period is limited to one month.
 Get various statistics about actions taken by admins of the French Wikipedia
 over the past week:
 
-    https://xtools.wmflabs.org/api/project/adminstats/frwiki/7
-    https://xtools.wmflabs.org/api/project/adminstats/fr.wikipedia.org/7
+    https://xtools.wmflabs.org/api/project/admin_stats/frwiki/7
+    https://xtools.wmflabs.org/api/project/admin_stats/fr.wikipedia.org/7

@@ -21,8 +21,7 @@ class AdminStatsController extends XtoolsController
     protected $adminStats;
 
     /**
-     * Get the name of the tool's index route.
-     * This is also the name of the associated model.
+     * Get the name of the tool's index route. This is also the name of the associated model.
      * @return string
      * @codeCoverageIgnore
      */
@@ -32,26 +31,8 @@ class AdminStatsController extends XtoolsController
     }
 
     /**
-     * Every action in this controller (other than 'index') calls this first.
-     * If a response is returned, the calling action is expected to return it.
-     * @return AdminStats
-     * @codeCoverageIgnore
-     */
-    public function setUpAdminStats()
-    {
-        $this->adminStats = new AdminStats($this->project, $this->start, $this->end);
-        $adminStatsRepo = new AdminStatsRepository();
-        $adminStatsRepo->setContainer($this->container);
-        $this->adminStats->setRepository($adminStatsRepo);
-
-        // For testing purposes.
-        return $this->adminStats;
-    }
-
-    /**
      * Method for rendering the AdminStats Main Form.
-     * This method redirects if valid parameters are found, making it a
-     * valid form endpoint as well.
+     * This method redirects if valid parameters are found, making it a valid form endpoint as well.
      * @Route("/adminstats", name="AdminStats")
      * @Route("/adminstats/", name="AdminStatsSlash")
      * @Route("/adminstats/index.php", name="AdminStatsIndexPhp")
@@ -65,11 +46,36 @@ class AdminStatsController extends XtoolsController
         }
 
         // Otherwise render form.
-        return $this->render('adminStats/index.html.twig', [
+        return $this->render('adminStats/index.html.twig', array_merge([
             'xtPage' => 'adminstats',
             'xtPageTitle' => 'tool-adminstats',
             'xtSubtitle' => 'tool-adminstats-desc',
-        ]);
+
+            // Defaults that will get overridden if in $params.
+            'start' => '',
+            'end' => '',
+        ], $this->params));
+    }
+
+    /**
+     * Every action in this controller (other than 'index') calls this first.
+     * If a response is returned, the calling action is expected to return it.
+     * @return AdminStats
+     * @codeCoverageIgnore
+     */
+    public function setUpAdminStats()
+    {
+        // $this->start and $this->end are already set by the parent XtoolsController, but here we want defaults,
+        // so we run XtoolsController::getUTCFromDateParams() once more but with the $useDefaults flag set.
+        list($this->start, $this->end) = $this->getUTCFromDateParams($this->start, $this->end, true);
+
+        $adminStatsRepo = new AdminStatsRepository();
+        $adminStatsRepo->setContainer($this->container);
+        $this->adminStats = new AdminStats($this->project, $this->start, $this->end);
+        $this->adminStats->setRepository($adminStatsRepo);
+
+        // For testing purposes.
+        return $this->adminStats;
     }
 
     /**
@@ -125,6 +131,12 @@ class AdminStatsController extends XtoolsController
      * @Route(
      *     "/api/project/adminstats/{project}/{days}",
      *     name="ProjectApiAdminStats",
+     *     requirements={"days"="\d+"},
+     *     defaults={"days"=30}
+     * )
+     * @Route(
+     *     "/api/project/admin_stats/{project}/{days}",
+     *     name="ProjectApiAdminStatsUnderscored",
      *     requirements={"days"="\d+"},
      *     defaults={"days"=30}
      * )

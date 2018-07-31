@@ -5,7 +5,6 @@
 
 namespace AppBundle\Controller;
 
-use AppBundle\Exception\XtoolsHttpException;
 use Sensio\Bundle\FrameworkExtraBundle\Configuration\Route;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;

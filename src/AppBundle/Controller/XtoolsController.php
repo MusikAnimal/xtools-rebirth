@@ -418,16 +418,16 @@ abstract class XtoolsController extends Controller
     /**
      * Get UTC timestamps from given start and end string parameters. This also makes $start on month before
      * $end if not present, and makes $end the current time if not present.
-     * @param string $start
-     * @param string $end
+     * @param int|string $start Unix timestamp or string accepted by strtotime.
+     * @param int|string $end Unix timestamp or string accepted by strtotime.
      * @param bool $useDefaults Whether to use defaults if the values are blank. The start date is set to one month
      *   before the end date, and the end date is set to the present.
      * @return mixed[] Start and end date as UTC timestamps or 'false' if empty.
      */
     public function getUTCFromDateParams($start, $end, $useDefaults = false)
     {
-        $start = strtotime($start);
-        $end = strtotime($end);
+        $start = is_int($start) ? $start : strtotime($start);
+        $end = is_int($end) ? $end : strtotime($end);
 
         // Use current time if end is not present (and is required), or if it exceeds the current time.
         if (($useDefaults && $end === false) || $end > time()) {
