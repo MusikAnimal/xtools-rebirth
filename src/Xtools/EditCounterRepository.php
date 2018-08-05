@@ -33,9 +33,14 @@ class EditCounterRepository extends UserRightsRepository
         $archiveTable = $this->getTableName($project->getDatabaseName(), 'archive');
         $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
 
+        if ($user->hasTooManyEdits($project)) {
+            // Add a LIMIT on the number of rows scanned.
+            $archiveTable = "(SELECT 1 FROM $archiveTable ";
+        }
+
         // For IPs we use rev_user_text, and for accounts rev_user which is slightly faster.
-        $revUserClause = $user->isAnon() ? 'rev_user_text = :username' : 'rev_user = :userId';
-        $arUserClause = $user->isAnon() ? 'ar_user_text = :username' : 'ar_user = :userId';
+        $revUserClause = $user->isAnon() ? 'rev_user_text = :user' : 'rev_user = :user';
+        $arUserClause = $user->isAnon() ? 'ar_user_text = :user' : 'ar_user = :user';
 
         $sql = "
             -- Revision counts.
@@ -83,8 +88,9 @@ class EditCounterRepository extends UserRightsRepository
             )
         ";
 
-        $params = $user->isAnon() ? ['username' => $user->getUsername()] : ['userId' => $user->getId($project)];
-        $resultQuery = $this->executeProjectsQuery($sql, $params);
+        $resultQuery = $this->executeProjectsQuery($sql, [
+            'user' => $user->isAnon() ? $user->getUsername() : $user->getId($project)
+        ]);
 
         $revisionCounts = [];
         while ($result = $resultQuery->fetch()) {
@@ -93,6 +99,18 @@ class EditCounterRepository extends UserRightsRepository
 
         // Cache and return.
         return $this->setCache($cacheKey, $revisionCounts);
+    }
+
+    private function getPairDataQuery(Project $project, $key, $valueClause, $table, $userClause, $clause, $select = '1')
+    {
+        $table = $this->getTableName($project->getDatabaseName(), $table);
+        return "(
+            SELECT 1
+            FROM $table
+            WHERE ar_user = :user
+            ORDER BY ar_timestamp DESC
+            LIMIT 500
+        ) a";
     }
 
     /**
@@ -285,7 +303,7 @@ class EditCounterRepository extends UserRightsRepository
      *
      * @param User $user The user.
      * @param Project $project The project to start from.
-     * @return mixed[] Elements are arrays with 'dbName' (string), and 'total' (int).
+     * @return mixed[]|bool Elements are arrays with 'dbName' (string), and 'total' (int).
      */
     protected function globalEditCountsFromCentralAuth(User $user, Project $project)
     {

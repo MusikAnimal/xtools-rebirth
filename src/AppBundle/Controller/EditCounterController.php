@@ -59,11 +59,11 @@ class EditCounterController extends XtoolsController
      */
     public function __construct(RequestStack $requestStack, ContainerInterface $container)
     {
-        // Causes the tool to redirect to the Simple Edit Counter if the user has too high of an edit count.
-        $this->tooHighEditCountAction = 'SimpleEditCounterResult';
-
-        // The rightsChanges action is exempt from the edit count limitation.
-        $this->tooHighEditCountActionBlacklist = ['rightsChanges'];
+//        // Causes the tool to redirect to the Simple Edit Counter if the user has too high of an edit count.
+//        $this->tooHighEditCountAction = 'SimpleEditCounterResult';
+//
+//        // The rightsChanges action is exempt from the edit count limitation.
+//        $this->tooHighEditCountActionBlacklist = ['rightsChanges'];
 
         parent::__construct($requestStack, $container);
 

@@ -36,7 +36,7 @@ class TopEditsController extends XtoolsController
      */
     public function __construct(RequestStack $requestStack, ContainerInterface $container)
     {
-        $this->tooHighEditCountAction = $this->getIndexRoute();
+//        $this->tooHighEditCountAction = $this->getIndexRoute();
 
         parent::__construct($requestStack, $container);
     }
