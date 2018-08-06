@@ -104,7 +104,7 @@ class EditCounterController extends XtoolsController
         $this->validateUser($this->user->getUsername());
 
         // Instantiate EditCounter.
-        $editCounterRepo = new EditCounterRepository();
+        $editCounterRepo = new EditCounterRepository($this->project, $this->user);
         $editCounterRepo->setContainer($this->container);
         $this->editCounter = new EditCounter(
             $this->project,

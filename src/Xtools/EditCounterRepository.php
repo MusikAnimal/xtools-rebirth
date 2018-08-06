@@ -14,6 +14,54 @@ use Mediawiki\Api\SimpleRequest;
  */
 class EditCounterRepository extends UserRightsRepository
 {
+    /** @var Project The related Project. */
+    private $project;
+
+    /** @var User The related User. */
+    private $user;
+
+    /** @var bool Whether the user has a high edit count. Used to adjust queries for efficiency. */
+    private $highEditCount;
+
+    /**
+     * EditCounterRepository constructor.
+     * @param Project $project
+     * @param User $user
+     */
+    public function __construct(Project $project, User $user)
+    {
+        parent::__construct();
+
+        $this->project = $project;
+        $this->user = $user;
+        $this->highEditCount = $this->user->hasTooManyEdits($this->project);
+    }
+
+    /**
+     * Get the SQL clause to filter by user. For IPs we use rev_user_text,
+     * and for accounts rev_user which is slightly faster.
+     * @param string $type
+     * @return string
+     */
+    private function getUserClause($type = 'rev')
+    {
+        return $this->user->isAnon()
+            ? $type.'_user_text = :user'
+            : $type.'_user = :user';
+    }
+
+    /**
+     * Get the SQL clause to filter by timestamp, based on which table we're querying.
+     * @param string $type
+     * @return string
+     */
+    private function getTimestampColumn($type = 'rev')
+    {
+        return $this->user->isAnon()
+            ? $type.'_timestamp'
+            : $type.'_timestamp';
+    }
+
     /**
      * Get data about revisions, pages, etc.
      * @param Project $project The project.
@@ -29,64 +77,49 @@ class EditCounterRepository extends UserRightsRepository
             return $this->cache->getItem($cacheKey)->get();
         }
 
-        // Prepare the queries and execute them.
-        $archiveTable = $this->getTableName($project->getDatabaseName(), 'archive');
-        $revisionTable = $this->getTableName($project->getDatabaseName(), 'revision');
+        $pairData = [
+            'deleted' => [
+                'type' => 'ar',
+            ],
+            'live' => [], // Uses defaults (see self::getPairDataQueries().
+            'day' => [
+                'clause' => 'rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)',
+            ],
+            'week' => [
+                'clause' => 'rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 WEEK)',
+            ],
+            'month' => [
+                'clause' => 'rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 MONTH)',
+            ],
+            'year' => [
+                'clause' => 'rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 YEAR)',
+            ],
+            'with_comments' => [
+                'clause' => "rev_comment != ''",
+            ],
+            'minor' => [
+                'clause' => 'rev_minor_edit = 1',
+            ],
+            'edited-live' => [
+                'column' => 'DISTINCT rev_page',
+            ],
+            'edited-deleted' => [
+                'type' => 'ar',
+                'column' => 'DISTINCT ar_page_id',
+            ],
+            'created-live' => [
+                'column' => 'DISTINCT rev_page',
+                'clause' => 'rev_parent_id = 0',
+            ],
+            'created-deleted' => [
+                'type' => 'ar',
+                'column' => 'DISTINCT ar_page_id',
+                'clause' => 'ar_parent_id = 0',
+            ],
+        ];
 
-        if ($user->hasTooManyEdits($project)) {
-            // Add a LIMIT on the number of rows scanned.
-            $archiveTable = "(SELECT 1 FROM $archiveTable ";
-        }
-
-        // For IPs we use rev_user_text, and for accounts rev_user which is slightly faster.
-        $revUserClause = $user->isAnon() ? 'rev_user_text = :user' : 'rev_user = :user';
-        $arUserClause = $user->isAnon() ? 'ar_user_text = :user' : 'ar_user = :user';
-
-        $sql = "
-            -- Revision counts.
-            (SELECT 'deleted' AS `key`, COUNT(ar_id) AS val FROM $archiveTable
-                WHERE $arUserClause
-            ) UNION (
-            SELECT 'live' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause
-            ) UNION (
-            SELECT 'day' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 DAY)
-            ) UNION (
-            SELECT 'week' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 WEEK)
-            ) UNION (
-            SELECT 'month' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 MONTH)
-            ) UNION (
-            SELECT 'year' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_timestamp >= DATE_SUB(NOW(), INTERVAL 1 YEAR)
-            ) UNION (
-            SELECT 'with_comments' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_comment != ''
-            ) UNION (
-            SELECT 'minor' AS `key`, COUNT(rev_id) AS val FROM $revisionTable
-                WHERE $revUserClause AND rev_minor_edit = 1
-
-            -- Page counts.
-            ) UNION (
-            SELECT 'edited-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
-                FROM $revisionTable
-                WHERE $revUserClause
-            ) UNION (
-            SELECT 'edited-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
-                FROM $archiveTable
-                WHERE $arUserClause
-            ) UNION (
-            SELECT 'created-live' AS `key`, COUNT(DISTINCT rev_page) AS `val`
-                FROM $revisionTable
-                WHERE $revUserClause AND rev_parent_id = 0
-            ) UNION (
-            SELECT 'created-deleted' AS `key`, COUNT(DISTINCT ar_page_id) AS `val`
-                FROM $archiveTable
-                WHERE $arUserClause AND ar_parent_id = 0
-            )
-        ";
+        $sqlParts = $this->getPairDataQueries($pairData);
+        $sql = '('.implode("\n) UNION (\n", $sqlParts).')';
 
         $resultQuery = $this->executeProjectsQuery($sql, [
             'user' => $user->isAnon() ? $user->getUsername() : $user->getId($project)
@@ -101,16 +134,42 @@ class EditCounterRepository extends UserRightsRepository
         return $this->setCache($cacheKey, $revisionCounts);
     }
 
-    private function getPairDataQuery(Project $project, $key, $valueClause, $table, $userClause, $clause, $select = '1')
+    private function getPairDataQueries(array $pairData)
     {
-        $table = $this->getTableName($project->getDatabaseName(), $table);
-        return "(
-            SELECT 1
-            FROM $table
-            WHERE ar_user = :user
-            ORDER BY ar_timestamp DESC
-            LIMIT 500
-        ) a";
+        $maxEdits = $this->user->maxEdits();
+        $sqlParts = [];
+
+        foreach ($pairData as $key => $opts) {
+            $opts = array_merge([
+                'type' => 'rev',
+                'clause' => '',
+                'column' => '*',
+            ], $opts);
+
+            $table = $opts['type'] === 'rev' ? 'revision' : 'archive';
+            $tableName = $this->getTableName($this->project->getDatabaseName(), $table);
+            $clause = $opts['clause'] != '' ? 'AND '.$opts['clause'] : '';
+
+            if ($this->highEditCount) {
+                $column = ltrim($opts['column'] === '*' ? '1' : $opts['column'], 'DISTINCT ');
+                $sql = "SELECT '$key' AS `key`, COUNT(".$opts['column'].") AS `val` FROM ";
+                $orderBy = $this->getTimestampColumn($opts['type']);
+                $sql .= "\n\t(SELECT $column".
+                        "\n\tFROM $tableName".
+                        "\n\tWHERE ".$this->getUserClause($opts['type']).
+                        "\n\t".$clause.
+                        "\n\tORDER BY $orderBy DESC".
+                        "\n\tLIMIT $maxEdits) a";
+            } else {
+                $column = $opts['column'] === '*' ? $opts['type'].'_id' : $opts['column'];
+                $sql = "\tSELECT '$key' AS `key`, COUNT(".$column.") AS `val`".
+                       "\n\tFROM $tableName\n\tWHERE ".$this->getUserClause($opts['type']).$clause;
+            }
+
+            $sqlParts[] = $sql;
+        }
+
+        return $sqlParts;
     }
 
     /**
