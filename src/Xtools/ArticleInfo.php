@@ -1169,7 +1169,7 @@ class ArticleInfo extends Model
         $botData = $this->getRepository()->getBotData($this->page, $this->start, $this->end);
         while ($bot = $botData->fetch()) {
             $bots[$bot['username']] = [
-                'count' => (int) $bot['count'],
+                'count' => (int)$bot['count'],
                 'current' => $bot['current'] === 'bot',
             ];
         }
@@ -1295,9 +1295,20 @@ class ArticleInfo extends Model
             }
         }
 
+        if ($this->getNumEditors() > 10) {
+            $numOtherEditors = $this->getNumEditors() - $this->getNumBots() - count($topTenEditorsByEdits);
+            $label = $numOtherEditors.' '.$this->container->get('app.i18n_helper')->msg(
+                'num-others', [$numOtherEditors]
+            );
+            $topTenEditorsByEdits['*'] = [
+                'label' => $label,
+                'value' => $this->getNumRevisionsProcessed() - $topTenCount - $this->getBotRevisionCount(),
+            ];
+        }
+
         // Loop through again and add percentages.
-        $this->topTenEditorsByEdits = array_map(function ($editor) use ($topTenCount) {
-            $editor['percentage'] = 100 * ($editor['value'] / $topTenCount);
+        $this->topTenEditorsByEdits = array_map(function ($editor) {
+            $editor['percentage'] = 100 * ($editor['value'] / $this->getNumRevisionsProcessed());
             return $editor;
         }, $topTenEditorsByEdits);
 
@@ -1330,16 +1341,34 @@ class ArticleInfo extends Model
         }, $topTenEditorsByAdded));
 
         // Then build a new array of top 10 editors by added text in the data structure needed for the chart.
-        return array_map(function ($editor) use ($topTenTotalAdded) {
+        $ret = array_map(function ($editor) use ($topTenTotalAdded) {
             $added = $this->editors[$editor]['added'];
             return [
                 'label' => $editor,
                 'value' => $added,
                 'percentage' => (
-                    100 * ($added / $topTenTotalAdded)
-                )
+                    100 * ($added / $this->addedBytes)
+                ),
             ];
         }, $topTenEditorsByAdded);
+
+        // Add 'n others' if applicable.
+        if ($this->getNumEditors() > 10) {
+            $numOtherEditors = $this->getNumEditors() - $this->getNumBots() - count($topTenEditorsByAdded);
+            $label = $numOtherEditors.' '.$this->container->get('app.i18n_helper')->msg(
+                'num-others', [$numOtherEditors]
+            );
+            $remainingAdded = $this->addedBytes - $topTenTotalAdded;
+            $ret['*'] = [
+                'label' => $label,
+                'value' => $remainingAdded,
+                'percentage' => (
+                    100 * ($remainingAdded / $this->addedBytes)
+                ),
+            ];
+        }
+
+        return $ret;
     }
 
     /**
