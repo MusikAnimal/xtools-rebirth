@@ -1,7 +1,7 @@
 {
     "name": "x-tools/xtools",
     "description": "A suite of tools to analyze page, user and project data of MediaWiki website",
-    "license": "GPL-3.0+",
+    "license": "GPL-3.0-or-later",
     "type": "project",
     "autoload": {
         "psr-4": {
